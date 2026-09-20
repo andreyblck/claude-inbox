@@ -64,7 +64,7 @@ export const LIMITS = {
    * subject — "Optics для pricing review email" — is the whole value of the row
    * and truncating it to a verb phrase throws that value away.
    */
-  subject: 48,
+  subject: 60,
   /** Characters of a command echoed into a single-line row. */
   commandInline: 24,
 } as const;
@@ -132,9 +132,62 @@ export function truncate(value: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1).trimEnd() + "…";
 }
 
+/**
+ * The last sentence, which in a narration is the current move.
+ *
+ * The model writes "<what just happened>. <what I am doing now>", so the front of
+ * the string is history and the back is the answer. Cutting at a character count
+ * keeps the history and throws the answer away — and lands mid-word doing it.
+ */
+export function lastSentence(value: string): string {
+  const text = oneLine(value);
+  // A full stop inside «a quote», (an aside) or `code` is not the end of a
+  // sentence, and splitting on it leaves a fragment like `Tests pass…»), а не`.
+  const OPEN = "«(“[{\u0060";
+  const CLOSE = "»)”]}\u0060";
+  const starts: number[] = [0];
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === "\u0060") depth = depth ? depth - 1 : 1;
+    else if (OPEN.includes(char)) depth++;
+    else if (CLOSE.includes(char)) depth = Math.max(0, depth - 1);
+    else if (depth === 0 && ".!?…".includes(char)) {
+      let j = i + 1;
+      while (j < text.length && ".!?…".includes(text[j])) j++;
+      if (text[j] === " ") starts.push(j + 1);
+    }
+  }
+  const parts = starts
+    .map((start, index) => text.slice(start, starts[index + 1] ?? text.length).trim())
+    .filter(Boolean);
+  if (parts.length < 2) return parts[0] ?? text;
+  const last = parts[parts.length - 1];
+  // "44 из 44." on its own says nothing; a fragment that short is a result, not
+  // an action, so keep the sentence before it as well.
+  if (last.length >= 16) return last;
+  return `${parts[parts.length - 2]} ${last}`.trim();
+}
+
 /** One line, no runs of whitespace. Commands arrive with newlines in them. */
 export function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * A menu row is not a document. Assistant text is written as markdown — `**Раз:**`,
+ * backticks around identifiers, list bullets — and every one of those characters
+ * is spent on formatting that nothing here renders.
+ */
+export function plainText(value: string): string {
+  return oneLine(
+    value
+      .replace(/\u0060{1,3}([^\u0060]*)\u0060{1,3}/g, "$1")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|$)/g, "$1$2")
+      .replace(/^[\s>#-]+/, "")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1"),
+  );
 }
 
 /**
@@ -247,12 +300,17 @@ export function phaseOf(prompt?: string | null): string | undefined {
  * current move; for a finished one the only question is what landed.
  */
 export function subjectOf(session: SessionRecord, max: number = LIMITS.subject): string {
-  const clean = (value?: string | null) => {
+  const clean = (value?: string | null, narration = false) => {
     const text = value?.trim();
     if (!text) return undefined;
+    // A narration has a front and a back; an instruction is just an instruction.
+    if (narration) {
+      const sentence = plainText(lastSentence(plainText(text)));
+      return sentence || undefined;
+    }
     // The slash command is shown as the phase; repeating it here costs the
     // characters that carry the actual request.
-    const body = oneLine(text.replace(/^\s*\/[a-z0-9:_-]+\s*/i, ""));
+    const body = plainText(text.replace(/^\s*\/[a-z0-9:_-]+\s*/i, ""));
     return body || undefined;
   };
 
@@ -260,14 +318,33 @@ export function subjectOf(session: SessionRecord, max: number = LIMITS.subject):
   // that sentence beats anything derived — a title summarising the first prompt
   // ("Давай давай давай"), a tool name, or the state the icon already shows.
   const finished = STATES[session.state].group === "finished";
-  const candidates = finished
-    ? [session.last_message, session.saying, session.title, session.last_prompt]
-    : [session.saying, session.last_prompt, session.title, session.activity?.[0]];
+  const candidates: [string | null | undefined, boolean][] = finished
+    ? [
+        // A closing message is not a narration: the verdict is its first words
+        // ("Shipped.", "Готово, тесты зелёные."), and the rest is detail. Taking
+        // the last sentence here throws away the answer instead of the history.
+        [session.last_message, false],
+        [session.saying, true],
+        [session.title, false],
+        [session.last_prompt, false],
+      ]
+    : [
+        [session.saying, true],
+        // The title is what the session is *about*; the prompt is what was said
+        // in the last moment, and that is often an aside — "без отправок в лс",
+        // "давай доделывай". A row names the work, not the last correction.
+        [session.title, false],
+        [session.last_prompt, false],
+        [session.activity?.[0], false],
+      ];
 
-  for (const candidate of candidates) {
-    const text = clean(candidate);
+  for (const [candidate, narration] of candidates) {
+    const text = clean(candidate, narration);
     if (text) return truncate(text, max);
   }
+  // The step is thin, but it is a fact about the work. "working" beside a glyph
+  // that already means working is a word spent on nothing.
+  if (session.phase) return truncate(session.phase, max);
   return STATES[session.state].label.toLowerCase();
 }
 

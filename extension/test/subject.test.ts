@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { readSessionSummary } from "../src/lib/inbox";
-import { phaseOf, subjectOf, type InboxState, type SessionRecord } from "../src/lib/state";
+import { lastSentence, phaseOf, plainText, subjectOf, type InboxState, type SessionRecord } from "../src/lib/state";
 
 function session(over: Partial<SessionRecord> & { state: InboxState }): SessionRecord {
   return { session_id: "s", ts: Math.round(Date.now() / 1000), ...over };
@@ -30,6 +30,49 @@ describe("the step a session declared", () => {
     assert.equal(phaseOf("почини иконку в меню баре"), undefined);
     assert.equal(phaseOf(""), undefined);
     assert.equal(phaseOf(undefined), undefined);
+  });
+});
+
+describe("cutting a sentence out of a narration", () => {
+  it("takes the last sentence, because that is the current move", () => {
+    // The model writes "<what just happened>. <what I am doing now>", so the
+    // front is history. Cutting at a character count keeps the history.
+    assert.equal(lastSentence("Все четыре строки читаются. Закрываю тестами."), "Закрываю тестами.");
+  });
+
+  it("keeps a result that is too short to stand alone", () => {
+    assert.equal(
+      lastSentence("44 из 44. Обновляю DESIGN под новый порядок источников."),
+      "Обновляю DESIGN под новый порядок источников.",
+    );
+    assert.equal(lastSentence("Готово. Всё."), "Готово. Всё.");
+  });
+
+  it("does not break on a full stop inside a quote, an aside or code", () => {
+    // `Tests pass…»), а не в конце.` is what came out before this was handled.
+    assert.equal(
+      lastSentence("Итог стоит в начале («Shipped. Tests pass»), а не в конце."),
+      "Итог стоит в начале («Shipped. Tests pass»), а не в конце.",
+    );
+    assert.equal(lastSentence("Запускаю `npm run a.b.c` сейчас."), "Запускаю `npm run a.b.c` сейчас.");
+  });
+
+  it("leaves a single sentence alone", () => {
+    assert.equal(lastSentence("Чиню класс, а не экземпляр."), "Чиню класс, а не экземпляр.");
+  });
+});
+
+describe("a menu row is not a document", () => {
+  it("strips the markdown the model writes in", () => {
+    assert.equal(plainText("**Раз:** правлю `state.ts` и _тесты_"), "Раз: правлю state.ts и тесты");
+  });
+  it("strips bullets, quotes and links", () => {
+    assert.equal(plainText("- see [the docs](https://x.y) first"), "see the docs first");
+    assert.equal(plainText("> цитата"), "цитата");
+  });
+  it("reaches the row, not just the helper", () => {
+    const row = session({ state: "working", saying: "Готово. Правлю `state.ts` и **тесты**." });
+    assert.equal(subjectOf(row), "Правлю state.ts и тесты.");
   });
 });
 
@@ -54,11 +97,19 @@ describe("what a session is about", () => {
     assert.equal(subjectOf(row), "дособери фичу");
   });
 
-  it("prefers the request over the generated title", () => {
-    // The title summarises how the session opened; the prompt is what it is on
-    // now. When they disagree, the newer one is the truer one.
-    const row = session({ state: "working", title: "Иконка в меню бар", last_prompt: "теперь почини уведомления" });
-    assert.equal(subjectOf(row), "теперь почини уведомления");
+  it("prefers the title over the last thing said to it", () => {
+    // Tried it the other way first, on the theory that newer is truer. It is
+    // not: the title names the work, while the newest prompt is usually an
+    // aside — "без отправок в лс", "давай доделывай" — and a row that shows the
+    // aside instead of the job is worse than one that shows neither.
+    const row = session({ state: "working", title: "Optics для pricing review", last_prompt: "без отправок в лс" });
+    assert.equal(subjectOf(row), "Optics для pricing review");
+  });
+
+  it("takes the current move over the session's subject", () => {
+    // What it is doing now beats what it is about, when we have both.
+    const row = session({ state: "working", saying: "Закрываю тестами.", title: "Иконка в меню бар" });
+    assert.equal(subjectOf(row), "Закрываю тестами.");
   });
 
   it("falls back to what it is touching, when nothing was said or asked", () => {
@@ -81,13 +132,18 @@ describe("what a session is about", () => {
     assert.equal(subjectOf(row), "Shipped. Tests pass, PR opened.");
   });
 
-  it("says the state only when it knows nothing else", () => {
+  it("shows the step rather than the word the icon already says", () => {
+    // "working" beside a glyph that means working is a row spent on nothing.
+    assert.equal(subjectOf(session({ state: "working", phase: "qa" })), "qa");
+  });
+
+  it("says the state only when it knows nothing at all", () => {
     assert.equal(subjectOf(session({ state: "working" })), "working");
   });
 
   it("keeps it to one line and inside the budget", () => {
     const row = session({ state: "working", saying: "a".repeat(200) });
-    assert.ok(subjectOf(row).length <= 48, `${subjectOf(row).length} chars`);
+    assert.ok(subjectOf(row).length <= 60, `${subjectOf(row).length} chars`);
     const wrapped = session({ state: "working", saying: "first line\nsecond    line" });
     assert.equal(subjectOf(wrapped), "first line second line");
   });

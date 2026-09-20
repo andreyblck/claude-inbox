@@ -86,8 +86,17 @@ Recently finished
 
 Rules that keep it from turning into mush:
 
-1. **One line per row. Never wraps.** `<glyph> <project> · <what>` plus a right-hand
-   `subtitle` for time or shortcut. If it does not fit, it gets truncated, not folded.
+1. **One line per row, in two weights.** The project is the row's `title`; the
+   subject and the time are its dim `subtitle`. Packed together into one string
+   they became a wall of truncated prose with nothing for the eye to land on —
+   a column of short names reads at a glance, and the sentence beside it is read
+   only on the row you stopped at. Never wraps: truncated, not folded.
+
+   **Cut a sentence, not a character count.** A narration is written as
+   "<what just happened>. <what I am doing now>", so the front is history and the
+   back is the answer — take the last sentence, unless it is too short to stand
+   alone. And strip the markdown: the model writes `**bold**` and backticks, and
+   a menu renders neither.
 2. **Project** = basename of `cwd` (or the session name when set), 18 chars max.
    Never a path, never a UUID.
 3. **What** = for a blocked session, a lowercase verb phrase, 28 chars max:

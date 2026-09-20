@@ -33,7 +33,9 @@ function ask(row: Row): string {
 /** Right-hand text: the step, when the session declared one, and always the age. */
 function trailing(row: Row): string {
   const phase = row.kind === "session" ? row.session.phase : undefined;
-  return phase ? `${phase} · ${age(row.ts)}` : age(row.ts);
+  // When the step is all we know, it is already the subject — printing it twice
+  // is the same mistake as printing the state beside the icon that shows it.
+  return phase && phase !== ask(row) ? `${phase} · ${age(row.ts)}` : age(row.ts);
 }
 
 /** Five rows, then a submenu. A menu that scrolls has already failed. */
@@ -81,8 +83,11 @@ export default function Command() {
       <MenuBarExtra.Item
         key={row.id}
         icon={STATES[row.state].icon}
-        title={rowTitle(project(row), ask(row))}
-        subtitle={trailing(row)}
+        // Project as the title and everything else dim: the eye scans a column
+        // of short names and reads the prose only on the row it stopped at.
+        // Both packed into the title made a wall of truncated sentences.
+        title={project(row)}
+        subtitle={`${ask(row)}  ·  ${trailing(row)}`}
         // Opening is the safe default; ⌥ turns the row into an approval, so a
         // tool call is never allowed by a misclick.
         shortcut={withApprove && index < 9 ? { modifiers: ["cmd"], key: String(index + 1) as "1" } : undefined}
