@@ -26,11 +26,22 @@ One vocabulary, shared by `bridge/` and the UI. Nothing renders a state not in t
 | `blocked.plan` | waiting for plan approval | list | Yellow |
 | `blocked.dialog` | needs the terminal (trust, MCP consent) — cannot be answered here | exclamation | Orange |
 | `working` | busy, nothing needed | filled circle | Blue |
-| `idle` | turn finished, nothing asked | hollow circle | Secondary |
+| `idle` | **answered you** — turn finished, waiting to be read | speech bubble | Secondary |
 | `done` | session finished | check | Green |
 | `failed` | ended with an error | cross | Red |
 
-Only the four `blocked.*` states are "you". Everything else is weather.
+The four `blocked.*` states are "you, now". `idle` is "you, when you get to it" —
+and it was the thing this product was for in the first place: knowing what came
+back from a dozen sessions without visiting a dozen terminals. It spent its first
+version as a grey dot under "Running", which is where that idea went to die.
+
+So there are four sections, not three: **needs you**, **answered you**, **still
+going**, **done**. Everything in the last two is weather.
+
+The bar count stays blocked-only. Every session goes idle after every turn, so
+counting answers would make the badge a number that is always large and never
+urgent. The glyph changes instead — a speech bubble means there is something to
+read, without claiming you are needed.
 
 Two of these come from Claude Code's own registry rather than from a hook, so the
 vocabulary has to survive contact with theirs: `busy | shell | idle | waiting`.
@@ -67,12 +78,14 @@ Never put a project name or a message in the bar. The count is the whole message
 Colour is unavailable anyway (template rendering), so states differ by glyph shape —
 which is also how the system's own menu extras behave.
 
-Dropdown, at most three sections, each capped at five rows:
+Dropdown, at most four sections, each capped at five rows:
 
 ```
 Waiting for you
   🔒  skyaccess-api · run rm -rf dist              ⌘1
   ❓  wt-5608 · pick one of 3                      ⌘2
+Answered
+  💬  skyaccess-fc · Ожидаю два ревью (BE и FE)       5m
 Running
   ⬤  skyaccess-web · pull ▸ clean              4m
   ⬤  tarot · track                            12m

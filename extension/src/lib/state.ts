@@ -17,7 +17,7 @@ export type InboxState =
   | "done"
   | "failed";
 
-export type StateGroup = "waiting" | "running" | "finished";
+export type StateGroup = "waiting" | "answered" | "running" | "finished";
 
 type StateMeta = {
   /** Sentence-case, shown as an accessory tag. */
@@ -37,15 +37,20 @@ export const STATES: Record<InboxState, StateMeta> = {
   // so they are orange, not yellow: the only useful action is "take me there".
   "blocked.dialog": { label: "Needs terminal", icon: Icon.ExclamationMark, tint: Color.Orange, group: "waiting", rank: 3 },
   working: { label: "Working", icon: Icon.CircleFilled, tint: Color.Blue, group: "running", rank: 0 },
-  idle: { label: "Idle", icon: Icon.Circle, tint: Color.SecondaryText, group: "running", rank: 1 },
+  // A finished turn is not the same kind of quiet as a busy one: the session said
+  // something and is waiting for it to be read. That is the whole reason this
+  // product exists — knowing what came back without visiting twelve terminals —
+  // and it spent its life buried in "Running" as a grey dot.
+  idle: { label: "Answered", icon: Icon.SpeechBubble, tint: Color.SecondaryText, group: "answered", rank: 0 },
   done: { label: "Done", icon: Icon.CheckCircle, tint: Color.Green, group: "finished", rank: 0 },
   failed: { label: "Failed", icon: Icon.XMarkCircle, tint: Color.Red, group: "finished", rank: 1 },
 };
 
-const GROUP_ORDER: Record<StateGroup, number> = { waiting: 0, running: 1, finished: 2 };
+const GROUP_ORDER: Record<StateGroup, number> = { waiting: 0, answered: 1, running: 2, finished: 3 };
 
 export const GROUP_TITLES: Record<StateGroup, string> = {
   waiting: "Waiting for you",
+  answered: "Answered",
   running: "Running",
   finished: "Recently finished",
 };
@@ -182,6 +187,9 @@ export function oneLine(value: string): string {
 export function plainText(value: string): string {
   return oneLine(
     value
+      // A fenced block is quoted output, not the sentence around it. Left in, a
+      // row ends up showing a fragment of whatever the session happened to print.
+      .replace(/\u0060{3}[\s\S]*?(\u0060{3}|$)/g, " ")
       .replace(/\u0060{1,3}([^\u0060]*)\u0060{1,3}/g, "$1")
       .replace(/\*\*([^*]+)\*\*/g, "$1")
       .replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|$)/g, "$1$2")
@@ -317,7 +325,10 @@ export function subjectOf(session: SessionRecord, max: number = LIMITS.subject):
   // The model narrates itself before it acts, in the person's own language, and
   // that sentence beats anything derived — a title summarising the first prompt
   // ("Давай давай давай"), a tool name, or the state the icon already shows.
-  const finished = STATES[session.state].group === "finished";
+  // Answered and finished are read the same way: the message is the point, and
+  // its verdict is at the front. A running session is read for its current move.
+  const group = STATES[session.state].group;
+  const finished = group === "finished" || group === "answered";
   const candidates: [string | null | undefined, boolean][] = finished
     ? [
         // A closing message is not a narration: the verdict is its first words
@@ -353,5 +364,7 @@ export function bySeverity(a: { state: InboxState; ts: number }, b: { state: Inb
   const mb = STATES[b.state];
   if (ma.group !== mb.group) return GROUP_ORDER[ma.group] - GROUP_ORDER[mb.group];
   if (ma.rank !== mb.rank) return ma.rank - mb.rank;
-  return ma.group === "finished" ? b.ts - a.ts : a.ts - b.ts;
+  // Newest first where the row is a result to read; oldest first where it is
+  // something that has been kept waiting.
+  return ma.group === "finished" || ma.group === "answered" ? b.ts - a.ts : a.ts - b.ts;
 }

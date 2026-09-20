@@ -9,7 +9,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { readSessionSummary } from "../src/lib/inbox";
-import { lastSentence, phaseOf, plainText, subjectOf, type InboxState, type SessionRecord } from "../src/lib/state";
+import {
+  bySeverity,
+  lastSentence,
+  phaseOf,
+  plainText,
+  STATES,
+  subjectOf,
+  type InboxState,
+  type SessionRecord,
+} from "../src/lib/state";
 
 function session(over: Partial<SessionRecord> & { state: InboxState }): SessionRecord {
   return { session_id: "s", ts: Math.round(Date.now() / 1000), ...over };
@@ -70,9 +79,52 @@ describe("a menu row is not a document", () => {
     assert.equal(plainText("- see [the docs](https://x.y) first"), "see the docs first");
     assert.equal(plainText("> цитата"), "цитата");
   });
+  it("drops a fenced block: it is quoted output, not the sentence", () => {
+    // Left in, a row shows a fragment of whatever the session happened to print.
+    assert.equal(plainText("Смотрите:\n\u0060\u0060\u0060\nidle  Статус: собрано\n\u0060\u0060\u0060\nГотово."), "Смотрите: Готово.");
+  });
+
   it("reaches the row, not just the helper", () => {
     const row = session({ state: "working", saying: "Готово. Правлю `state.ts` и **тесты**." });
     assert.equal(subjectOf(row), "Правлю state.ts и тесты.");
+  });
+});
+
+describe("a finished turn is an answer, not idleness", () => {
+  it("an idle session is grouped as answered, not as running", () => {
+    // The whole point of the product is knowing what came back without visiting
+    // twelve terminals. This spent its life as a grey dot under "Running".
+    assert.equal(STATES.idle.group, "answered");
+    assert.equal(STATES.idle.label, "Answered");
+    assert.equal(STATES.working.group, "running");
+  });
+
+  it("sections run: needs you, answered you, still going, done", () => {
+    const order = (["done", "working", "idle", "blocked.permission"] as InboxState[])
+      .map((state) => ({ state, ts: 0 }))
+      .sort(bySeverity)
+      .map((row) => STATES[row.state].group);
+    assert.deepEqual(order, ["waiting", "answered", "running", "finished"]);
+  });
+
+  it("an answered row shows what it said", () => {
+    const row = session({
+      state: "idle",
+      last_message: "Ожидаю два ревью (BE и FE).",
+      saying: "Запускаю сборку.",
+      activity: ["running npm test"],
+    });
+    assert.equal(subjectOf(row), "Ожидаю два ревью (BE и FE).");
+  });
+
+  it("newest answer first: it is a result to read, not a queue to clear", () => {
+    const rows = (
+      [
+        { state: "idle" as InboxState, ts: 100 },
+        { state: "idle" as InboxState, ts: 900 },
+      ]
+    ).sort(bySeverity);
+    assert.deepEqual(rows.map((r) => r.ts), [900, 100]);
   });
 });
 

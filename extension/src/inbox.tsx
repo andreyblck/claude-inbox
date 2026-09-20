@@ -212,7 +212,7 @@ export default function Command() {
     revalidate();
   }
 
-  const groups: StateGroup[] = ["waiting", "running", "finished"];
+  const groups: StateGroup[] = ["waiting", "answered", "running", "finished"];
 
   return (
     <List

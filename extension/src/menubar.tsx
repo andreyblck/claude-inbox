@@ -60,12 +60,24 @@ export default function Command() {
   const installed = data?.installed;
   const usage = data?.usage ?? [];
   const waiting = rows.filter((r) => STATES[r.state].group === "waiting");
+  const answered = rows.filter((r) => STATES[r.state].group === "answered");
   const running = rows.filter((r) => STATES[r.state].group === "running");
   const finished = rows.filter((r) => STATES[r.state].group === "finished");
   const peak = usage.reduce((max, u) => Math.max(max, usagePeak(u)), 0);
 
   // The bar answers one question: am I needed? A count is the whole message.
-  const icon = waiting.length ? Icon.Bell : peak >= USAGE_ALERT ? Icon.Warning : running.length ? Icon.CircleFilled : Icon.Circle;
+  // The count stays blocked-only: a turn ending is not a demand, and every
+  // session idles after every turn. But the glyph can say there is something to
+  // read without claiming you are needed.
+  const icon = waiting.length
+    ? Icon.Bell
+    : peak >= USAGE_ALERT
+      ? Icon.Warning
+      : answered.length
+        ? Icon.SpeechBubble
+        : running.length
+          ? Icon.CircleFilled
+          : Icon.Circle;
   const title = waiting.length ? String(waiting.length) : undefined;
 
   async function approve(row: Row) {
@@ -125,7 +137,13 @@ export default function Command() {
       icon={icon}
       title={title}
       isLoading={isLoading}
-      tooltip={waiting.length ? `${waiting.length} waiting for you` : "Claude sessions"}
+      tooltip={
+        waiting.length
+          ? `${waiting.length} waiting for you`
+          : answered.length
+            ? `${answered.length} answered`
+            : "Claude sessions"
+      }
     >
       {installed === false ? (
         <MenuBarExtra.Section>
@@ -139,6 +157,7 @@ export default function Command() {
         </MenuBarExtra.Section>
       ) : null}
       {section(GROUP_TITLES.waiting, waiting, true)}
+      {section(GROUP_TITLES.answered, answered)}
       {section(GROUP_TITLES.running, running)}
       {section(GROUP_TITLES.finished, capped(finished, 3)[0])}
 
