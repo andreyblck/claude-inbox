@@ -15,8 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.action = #selector(toggle)
+        statusItem.button?.action = #selector(clicked)
         statusItem.button?.target = self
+        // Left click opens the panel; right click is for the things you set once
+        // and forget, which do not belong inside the panel itself.
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         popover = NSPopover()
         popover.behavior = .transient
@@ -41,6 +44,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         store.start()
         render()
+
+        Hotkey.shared.register { [weak self] in self?.toggle() }
+        // A menu bar app that is not running when a session blocks never tells
+        // anyone anything, so this is offered on first launch rather than hidden
+        // in a menu nobody opens.
+        if !LoginItem.enabled, !UserDefaults.standard.bool(forKey: "askedAboutLogin") {
+            UserDefaults.standard.set(true, forKey: "askedAboutLogin")
+            LoginItem.set(true)
+        }
         // The bar redraws when the inbox changes, which is what the watcher is
         // for; this keeps the glyph in step with it.
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -78,6 +90,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             waiting > 0 ? "\(waiting) waiting for you"
             : answered > 0 ? "\(answered) answered"
             : "Claude sessions"
+    }
+
+    @objc private func clicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showMenu()
+        } else {
+            toggle()
+        }
+    }
+
+    private func showMenu() {
+        let menu = NSMenu()
+
+        let login = NSMenuItem(
+            title: "Open at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
+        login.target = self
+        login.state = LoginItem.enabled ? .on : .off
+        menu.addItem(login)
+
+        let inbound = Settings.inbound()
+        let deliver = NSMenuItem(
+            title: "Deliver notes to bypassing sessions", action: #selector(toggleInbound),
+            keyEquivalent: "")
+        deliver.target = self
+        deliver.state = inbound == .accept ? .on : .off
+        // The trade, where the switch is, rather than in a document nobody reads.
+        deliver.toolTip = """
+            Sets crossSessionInbound. While this is off, Claude Code parks notes             sent from here to a session that bypasses prompts, and you release             them in the terminal. While it is on, anything running as you on this             machine can steer such a session.
+            """
+        menu.addItem(deliver)
+
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Panel: ⌥Space", action: nil, keyEquivalent: ""))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(
+            title: "Quit Claude Inbox", action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"))
+
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil  // put the click back to opening the panel
+    }
+
+    @objc private func toggleLoginItem() {
+        LoginItem.set(!LoginItem.enabled)
+    }
+
+    @objc private func toggleInbound() {
+        Settings.setInbound(Settings.inbound() == .accept ? .hold : .accept)
     }
 
     @objc private func toggle() {
@@ -176,6 +237,14 @@ if let i = CommandLine.arguments.firstIndex(of: "--md"), CommandLine.arguments.c
         case .rule: print("rule")
         }
     }
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--login-status") {
+    print("bundle:  \(Bundle.main.bundlePath)")
+    print("enabled: \(LoginItem.enabled)")
+    print("register: \(LoginItem.set(true) ? "ok" : "failed")")
+    print("enabled after: \(LoginItem.enabled)")
     exit(0)
 }
 

@@ -11,8 +11,10 @@ CONFIG="${1:-release}"
 NAME=ClaudeInbox
 APP="build/$NAME.app"
 
-swift build -c "$CONFIG"
-BIN=$(swift build -c "$CONFIG" --show-bin-path)/"$NAME"
+# Only the bundle path goes to stdout: this script is meant to be substituted
+# into a variable, and a compiler log in that variable is a path that is not one.
+swift build -c "$CONFIG" >&2
+BIN=$(swift build -c "$CONFIG" --show-bin-path 2>/dev/null)/"$NAME"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
