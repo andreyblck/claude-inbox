@@ -1,6 +1,7 @@
 import { Icon, LaunchType, MenuBarExtra, launchCommand } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import {
+  bridgeInstalled,
   enrichRows,
   mergeRows,
   readLiveSessions,
@@ -50,10 +51,11 @@ export default function Command() {
       readUsage(),
     ]);
     const rows = await enrichRows(mergeRows(pending, sessions, live).sort(bySeverity));
-    return { rows, usage };
+    return { rows, usage, installed: await bridgeInstalled() };
   });
 
   const rows = data?.rows ?? [];
+  const installed = data?.installed;
   const usage = data?.usage ?? [];
   const waiting = rows.filter((r) => STATES[r.state].group === "waiting");
   const running = rows.filter((r) => STATES[r.state].group === "running");
@@ -120,6 +122,17 @@ export default function Command() {
       isLoading={isLoading}
       tooltip={waiting.length ? `${waiting.length} waiting for you` : "Claude sessions"}
     >
+      {installed === false ? (
+        <MenuBarExtra.Section>
+          {/* A quiet bar and a disconnected one look identical; say which it is. */}
+          <MenuBarExtra.Item
+            icon={Icon.Plug}
+            title="Bridge not installed"
+            subtitle="run bridge/install.sh"
+            onAction={openInbox}
+          />
+        </MenuBarExtra.Section>
+      ) : null}
       {section(GROUP_TITLES.waiting, waiting, true)}
       {section(GROUP_TITLES.running, running)}
       {section(GROUP_TITLES.finished, capped(finished, 3)[0])}

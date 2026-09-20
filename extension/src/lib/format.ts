@@ -1,6 +1,6 @@
 /** Formatting that both views share. Nothing here reaches the filesystem. */
 import { Color } from "@raycast/api";
-import { age, LIMITS, oneLine, truncate } from "./state";
+import { age, oneLine, truncate } from "./state";
 import type { UsageRecord } from "./inbox";
 
 /** "resets in 2h 14m" — a countdown answers "can I keep going", a timestamp doesn't. */
@@ -57,7 +57,3 @@ export function codeBlock(value?: string): string {
   return ["```bash", oneLine(value).length > 400 ? truncate(value, 400) : value, "```", ""].join("\n");
 }
 
-export function activityLine(tools: string[]): string {
-  if (!tools.length) return "";
-  return `Recently: ${tools.map((t) => truncate(t, LIMITS.ask + 12)).join(", ")}`;
-}

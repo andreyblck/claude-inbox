@@ -1,8 +1,9 @@
-import { Action, ActionPanel, Icon, List, Toast, showToast } from "@raycast/api";
+import { Action, ActionPanel, Color, Icon, List, Toast, showToast } from "@raycast/api";
 import { getProgressIcon, usePromise } from "@raycast/utils";
 import { useEffect, useMemo, useState } from "react";
 import {
   accountLabel,
+  bridgeInstalled,
   enrichRows,
   mergeRows,
   readPending,
@@ -15,7 +16,7 @@ import {
   type Row,
   type UsageRecord,
 } from "./lib/inbox";
-import { activityLine, codeBlock, pct, resetsIn, usageLine, usageTint } from "./lib/format";
+import { codeBlock, pct, resetsIn, usageLine, usageTint } from "./lib/format";
 import {
   age,
   askDetail,
@@ -51,12 +52,15 @@ function useInbox() {
       readUsage(),
     ]);
     const rows = await enrichRows(mergeRows(pending, sessions, live).sort(bySeverity));
-    return { rows, usage };
+    return { rows, usage, installed: await bridgeInstalled() };
   });
   useInterval(revalidate, ROWS_POLL_MS);
   return {
     rows: data?.rows ?? [],
     usage: data?.usage ?? [],
+    // Undefined until the first read: an install warning that flashes on every
+    // open would be worse than the problem it reports.
+    installed: data?.installed,
     // `usePromise` flips isLoading on every revalidate, so binding it straight to
     // the List makes the loading bar pulse once a second forever. Only the first
     // load has nothing to show.
@@ -77,6 +81,10 @@ function rowAsk(row: Row): string {
   return row.session.waiting_for ?? subjectOf(row.session, 64);
 }
 
+function rowCwd(row: Row): string | undefined {
+  return row.kind === "pending" ? row.pending.cwd : row.session.cwd;
+}
+
 function rowTranscript(row: Row): string | undefined {
   return row.kind === "pending" ? row.pending.transcript_path : row.session.transcript_path;
 }
@@ -86,18 +94,26 @@ function Detail({ row, activity }: { row: Row; activity: string[] }) {
   const command = row.kind === "pending" ? askDetail(row.pending) : undefined;
   const cwd = row.kind === "pending" ? row.pending.cwd : row.session.cwd;
   const mode = row.kind === "pending" ? row.pending.permission_mode : row.session.permission_mode;
-  const lastMessage = row.kind === "session" ? row.session.last_message : undefined;
+  const session = row.kind === "session" ? row.session : undefined;
+  const heading = rowAsk(row);
 
-  const prompt = row.kind === "session" ? row.session.last_prompt : undefined;
+  // The question a person actually has is "what has it been doing?", so the pane
+  // is ordered by what answers that: the ask first when there is one, then what
+  // was wanted, then the trail of what it touched.
+  const asked = session?.last_prompt?.trim();
+  const said = session?.saying?.trim();
+  const landed = session?.last_message?.trim();
+
   const markdown = [
-    `## ${rowAsk(row)}`,
+    `## ${heading}`,
     "",
     codeBlock(command),
-    // What was actually asked for, when the row's title is a generated summary
-    // of it rather than the thing itself.
-    prompt && prompt.trim() !== rowAsk(row) ? `> ${oneLine(prompt).slice(0, 400)}\n` : "",
-    lastMessage ? `${lastMessage.slice(0, 600)}\n` : "",
-    activityLine(activity),
+    // Quote whichever of these is not already the heading — repeating the title
+    // as the body is how a detail pane becomes decoration.
+    asked && asked !== heading ? `> ${oneLine(asked).slice(0, 500)}\n` : "",
+    said && said !== heading ? `${said.slice(0, 600)}\n` : "",
+    landed && landed !== heading && landed !== said ? `${landed.slice(0, 600)}\n` : "",
+    activity.length ? ["**Recently**", "", ...activity.map((line) => `- ${line}`), ""].join("\n") : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -109,6 +125,9 @@ function Detail({ row, activity }: { row: Row; activity: string[] }) {
         <List.Item.Detail.Metadata>
           <List.Item.Detail.Metadata.TagList title="State">
             <List.Item.Detail.Metadata.TagList.Item text={meta.label} color={meta.tint} />
+            {session?.phase ? (
+              <List.Item.Detail.Metadata.TagList.Item text={session.phase} color={Color.SecondaryText} />
+            ) : null}
           </List.Item.Detail.Metadata.TagList>
           <List.Item.Detail.Metadata.Label title="Project" text={rowProject(row)} />
           {cwd ? <List.Item.Detail.Metadata.Label title="Path" text={cwd} /> : null}
@@ -165,7 +184,7 @@ function UsageDetail({ usage }: { usage: UsageRecord }) {
 }
 
 export default function Command() {
-  const { rows, usage, isLoading, revalidate } = useInbox();
+  const { rows, usage, installed, isLoading, revalidate } = useInbox();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Keyed by the transcript path, not by the row id: the path is what the read
@@ -206,11 +225,19 @@ export default function Command() {
       selectedItemId={selectedId ?? undefined}
       onSelectionChange={setSelectedId}
     >
-      <List.EmptyView
-        icon={Icon.CheckCircle}
-        title="Nothing needs you"
-        description="Sessions appear here the moment one blocks on a decision."
-      />
+      {installed === false ? (
+        <List.EmptyView
+          icon={Icon.Plug}
+          title="The bridge is not installed"
+          description={"Run bridge/install.sh once. Until then nothing reports in, and this screen\ncannot tell a quiet machine from a disconnected one."}
+        />
+      ) : (
+        <List.EmptyView
+          icon={Icon.CheckCircle}
+          title="Nothing needs you"
+          description="Sessions appear here the moment one blocks on a decision."
+        />
+      )}
 
       {groups.map((group) => {
         const items = rows.filter((row) => STATES[row.state].group === group);
@@ -231,11 +258,13 @@ export default function Command() {
                   title={rowAsk(row)}
                   subtitle={rowProject(row)}
                   accessories={[
+                    // The tinted icon on the left already names the state. In a
+                    // pane this narrow, a tag repeating it costs the characters
+                    // the subject needs.
                     ...(row.kind === "session" && row.session.phase
-                      ? [{ tag: { value: row.session.phase, color: meta.tint } }]
+                      ? [{ tag: { value: row.session.phase, color: Color.SecondaryText } }]
                       : []),
-                    { tag: { value: meta.label, color: meta.tint } },
-                    { text: age(row.ts) },
+                    { text: age(row.ts), tooltip: meta.label },
                   ]}
                   detail={<Detail row={row} activity={selectedId === row.id ? (activity ?? []) : []} />}
                   actions={
@@ -256,6 +285,23 @@ export default function Command() {
                         </>
                       ) : null}
                       {command ? <Action.CopyToClipboard title="Copy Command" content={command} /> : null}
+                      {/* The session is still there; this is how you get back to
+                          it without hunting for the window it started in. */}
+                      {row.kind === "session" ? (
+                        <Action.CopyToClipboard
+                          title="Copy Resume Command"
+                          icon={Icon.Terminal}
+                          content={`claude --resume ${row.session.session_id}`}
+                          shortcut={{ modifiers: ["cmd"], key: "t" }}
+                        />
+                      ) : null}
+                      {rowCwd(row) ? (
+                        <Action.ShowInFinder
+                          title="Open Project Folder"
+                          path={rowCwd(row) as string}
+                          shortcut={{ modifiers: ["cmd"], key: "o" }}
+                        />
+                      ) : null}
                       {rowTranscript(row) ? (
                         <Action.ShowInFinder title="Reveal Transcript" path={rowTranscript(row) as string} />
                       ) : null}

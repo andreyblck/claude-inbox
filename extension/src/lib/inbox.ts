@@ -58,6 +58,20 @@ export async function configDirs(): Promise<string[]> {
   return [...dirs];
 }
 
+/**
+ * Has the bridge ever been installed? An empty inbox and an absent one look the
+ * same to a reader, and "Nothing needs you" over a bridge that was never set up
+ * is a screen that lies calmly.
+ */
+export async function bridgeInstalled(): Promise<boolean> {
+  try {
+    await readFile(join(inboxDir(), "config-dirs"), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function readJsonDir<T>(dir: string): Promise<T[]> {
   let names: string[];
   try {
