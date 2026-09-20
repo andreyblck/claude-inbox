@@ -8,7 +8,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { readSessionSummary } from "../src/lib/inbox";
+import { readSessionSummary, readTurnNarration } from "../src/lib/inbox";
 import {
   bySeverity,
   lastSentence,
@@ -276,5 +276,36 @@ describe("reading a transcript for the title and the current move", () => {
   it("returns nothing rather than throwing on a file that is not there", async () => {
     assert.deepEqual(await readSessionSummary("/nope/nothing.jsonl"), {});
     assert.deepEqual(await readSessionSummary(undefined), {});
+  });
+
+  describe("everything the session has said since you last spoke", () => {
+    // Truncating this is what kept sending people back to the terminal: the row
+    // said a session had answered, and then would not show the answer.
+    const userSays = (text: string) => ({ type: "user", message: { content: [{ type: "text", text }] } });
+    const toolResult = () => ({ type: "user", message: { content: [{ type: "tool_result", content: "ok" }] } });
+
+    it("joins the whole turn, oldest first", async () => {
+      const path = await transcript([
+        userSays("сделай"),
+        says("Начинаю."),
+        toolUse("Bash", { command: "ls" }),
+        toolResult(),
+        says("Готово."),
+      ]);
+      assert.equal(await readTurnNarration(path), "Начинаю.\n\nГотово.");
+    });
+
+    it("stops at your message, not at a tool result", async () => {
+      // A tool result is also a "user" row. Treating it as the boundary would
+      // cut the turn at the first command it ran.
+      const path = await transcript([says("Старый ход."), userSays("теперь другое"), says("Новый ход.")]);
+      assert.equal(await readTurnNarration(path), "Новый ход.");
+    });
+
+    it("says nothing when the turn has produced no words yet", async () => {
+      const path = await transcript([userSays("сделай"), toolUse("Bash", { command: "ls" })]);
+      assert.equal(await readTurnNarration(path), undefined);
+      assert.equal(await readTurnNarration(undefined), undefined);
+    });
   });
 });

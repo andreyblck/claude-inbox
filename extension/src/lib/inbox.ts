@@ -516,6 +516,48 @@ export async function enrichRows(rows: Row[]): Promise<Row[]> {
   );
 }
 
+/**
+ * Everything the session has said since the last thing you said to it.
+ *
+ * `last_message` only exists once a turn has ended, so a session still working
+ * showed a single paragraph — and you went to the terminal to read the rest,
+ * which is the round trip this product exists to remove. Read for the selected
+ * row only; this is the expensive window.
+ */
+export async function readTurnNarration(transcriptPath?: string): Promise<string | undefined> {
+  if (!transcriptPath) return undefined;
+  const buf = await readTail(transcriptPath, 192 * 1024);
+  if (!buf) return undefined;
+
+  const said: string[] = [];
+  const lines = buf.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line.startsWith("{")) continue;
+    let row: { type?: string; message?: { content?: unknown } };
+    try {
+      row = JSON.parse(line);
+    } catch {
+      continue; // truncated first line of the window
+    }
+    const content = row.message?.content;
+    if (row.type === "assistant" && Array.isArray(content)) {
+      for (let j = content.length - 1; j >= 0; j--) {
+        const block = content[j] as { type?: string; text?: string };
+        if (block.type === "text" && block.text?.trim()) said.push(block.text.trim());
+      }
+      continue;
+    }
+    if (row.type !== "user") continue;
+    // A tool result is also a "user" row. Only a real message ends the turn.
+    const isToolResult =
+      Array.isArray(content) &&
+      content.some((part) => (part as { type?: string }).type === "tool_result");
+    if (!isToolResult) break;
+  }
+  return said.length ? said.reverse().join("\n\n") : undefined;
+}
+
 export type Row =
   | { kind: "pending"; id: string; state: InboxState; ts: number; pending: PendingItem }
   | { kind: "session"; id: string; state: InboxState; ts: number; session: SessionRecord };

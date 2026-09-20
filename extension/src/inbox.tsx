@@ -10,6 +10,7 @@ import {
   readLiveSessions,
   readRecentActivity,
   readSessions,
+  readTurnNarration,
   readUsage,
   touchHeartbeat,
   writeVerdict,
@@ -89,31 +90,34 @@ function rowTranscript(row: Row): string | undefined {
   return row.kind === "pending" ? row.pending.transcript_path : row.session.transcript_path;
 }
 
-function Detail({ row, activity }: { row: Row; activity: string[] }) {
+function Detail({ row, activity, narration }: { row: Row; activity: string[]; narration?: string }) {
   const meta = STATES[row.state];
   const command = row.kind === "pending" ? askDetail(row.pending) : undefined;
   const cwd = row.kind === "pending" ? row.pending.cwd : row.session.cwd;
   const mode = row.kind === "pending" ? row.pending.permission_mode : row.session.permission_mode;
   const session = row.kind === "session" ? row.session : undefined;
-  const heading = rowAsk(row);
 
-  // The question a person actually has is "what has it been doing?", so the pane
-  // is ordered by what answers that: the ask first when there is one, then what
-  // was wanted, then the trail of what it touched.
   const asked = session?.last_prompt?.trim();
-  const said = session?.saying?.trim();
-  const landed = session?.last_message?.trim();
+  // What the session actually said, in full. Truncating this was the reason you
+  // still had to open the terminal: the row told you a session had answered, and
+  // then refused to show you the answer.
+  // The turn's narration is the freshest and the fullest; `last_message` only
+  // appears once the turn has ended.
+  const answer = (narration ?? session?.last_message ?? session?.saying)?.trim();
+
+  // A decision is its own heading — it is the thing being decided. A session is
+  // headed by its project, because the subject line is the first words of the
+  // answer below it and printing that twice is how a pane becomes decoration.
+  const heading = row.kind === "pending" ? rowAsk(row) : rowProject(row);
 
   const markdown = [
     `## ${heading}`,
     "",
     codeBlock(command),
-    // Quote whichever of these is not already the heading — repeating the title
-    // as the body is how a detail pane becomes decoration.
-    asked && asked !== heading ? `> ${oneLine(asked).slice(0, 500)}\n` : "",
-    said && said !== heading ? `${said.slice(0, 600)}\n` : "",
-    landed && landed !== heading && landed !== said ? `${landed.slice(0, 600)}\n` : "",
-    activity.length ? ["**Recently**", "", ...activity.map((line) => `- ${line}`), ""].join("\n") : "",
+    asked ? `> ${oneLine(asked).slice(0, 500)}\n` : "",
+    answer ?? "",
+    answer ? "" : "\n",
+    activity.length ? ["---", "", "**Recently**", "", ...activity.map((line) => `- ${line}`), ""].join("\n") : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -129,7 +133,6 @@ function Detail({ row, activity }: { row: Row; activity: string[] }) {
               <List.Item.Detail.Metadata.TagList.Item text={session.phase} color={Color.SecondaryText} />
             ) : null}
           </List.Item.Detail.Metadata.TagList>
-          <List.Item.Detail.Metadata.Label title="Project" text={rowProject(row)} />
           {cwd ? <List.Item.Detail.Metadata.Label title="Path" text={cwd} /> : null}
           {row.kind === "pending" && row.pending.tool_name ? (
             <List.Item.Detail.Metadata.Label title="Tool" text={row.pending.tool_name} />
@@ -195,8 +198,11 @@ export default function Command() {
     return row ? rowTranscript(row) : undefined;
   }, [rows, selectedId]);
 
-  const { data: activity, revalidate: revalidateActivity } = usePromise(
-    async (path?: string) => readRecentActivity(path),
+  const { data: detail, revalidate: revalidateActivity } = usePromise(
+    async (path?: string) => ({
+      activity: await readRecentActivity(path),
+      narration: await readTurnNarration(path),
+    }),
     [selectedTranscript],
   );
   useInterval(revalidateActivity, ACTIVITY_POLL_MS);
@@ -266,7 +272,13 @@ export default function Command() {
                       : []),
                     { text: age(row.ts), tooltip: meta.label },
                   ]}
-                  detail={<Detail row={row} activity={selectedId === row.id ? (activity ?? []) : []} />}
+                  detail={
+                    <Detail
+                      row={row}
+                      activity={selectedId === row.id ? (detail?.activity ?? []) : []}
+                      narration={selectedId === row.id ? detail?.narration : undefined}
+                    />
+                  }
                   actions={
                     <ActionPanel>
                       {row.kind === "pending" ? (
