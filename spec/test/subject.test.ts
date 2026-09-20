@@ -15,6 +15,7 @@ import {
   phaseOf,
   plainText,
   STATES,
+  userPrompt,
   subjectOf,
   type InboxState,
   type SessionRecord,
@@ -125,6 +126,34 @@ describe("a finished turn is an answer, not idleness", () => {
       ]
     ).sort(bySeverity);
     assert.deepEqual(rows.map((r) => r.ts), [900, 100]);
+  });
+});
+
+describe("a system envelope is not something a person said", () => {
+  // Claude Code delivers task notifications and monitor wakes through the same
+  // field a person types into. A row that reads "<task-notification>" is showing
+  // plumbing, and a step parsed out of one is a step nobody declared.
+  const notification = "<task-notification>\n<task-id>abc</task-id>\n</task-notification>";
+
+  it("is not a prompt", () => {
+    assert.equal(userPrompt(notification), undefined);
+    assert.equal(userPrompt("<system-reminder>be careful</system-reminder>"), undefined);
+    assert.equal(userPrompt("  "), undefined);
+    assert.equal(userPrompt(undefined), undefined);
+  });
+
+  it("leaves real words alone, including ones with angle brackets in them", () => {
+    assert.equal(userPrompt("почини <div> в шапке"), "почини <div> в шапке");
+    assert.equal(userPrompt("/morgan:pull дособери"), "/morgan:pull дособери");
+  });
+
+  it("declares no step", () => {
+    assert.equal(phaseOf(notification), undefined);
+  });
+
+  it("never becomes the subject of a row", () => {
+    const row = session({ state: "working", last_prompt: notification });
+    assert.equal(subjectOf(row), "working");
   });
 });
 

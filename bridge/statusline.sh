@@ -2,7 +2,7 @@
 # statusLine wrapper — the only first-party feed of rate-limit data.
 #
 # Claude Code pipes a JSON payload here on every assistant message. We keep a copy
-# for Raycast and hand the same stdin to whatever status line was configured before
+# for the app and hand the same stdin to whatever status line was configured before
 # us, so installing the bridge never costs the user their own status line.
 #
 # Hot path: runs on every message. No `claude` subprocess, no network, no jq beyond

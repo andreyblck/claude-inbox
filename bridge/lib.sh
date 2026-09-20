@@ -49,38 +49,12 @@ inbox_wait() {
   return 1
 }
 
-# inbox_nudge — redraw the menu bar now instead of on its next 10s poll.
-# The URL lives in a file because hooks inherit the session's environment, not ours.
-inbox_nudge() {
-  local url="${CLAUDE_INBOX_NUDGE_URL:-}"
-  [ -n "$url" ] || url=$(cat "$INBOX_DIR/nudge-url" 2>/dev/null)
-  [ -n "$url" ] || return 0
-  # Raycast answers a background deeplink to a command nobody has enabled with
-  # "Command must be activated before it can be run in the background" — an error
-  # toast, on every turn of every session. The menu bar command writes this file
-  # when it runs, so its absence means there is nothing there to wake.
-  [ -f "$INBOX_DIR/heartbeat-menubar" ] || return 0
-  # A dozen sessions each ending a turn is a dozen launches a second. One redraw
-  # covers all of them; the 10s poll covers whatever this throttle skips.
-  local stamp="$INBOX_DIR/.nudged" now
-  now=$(date +%s)
-  if [ -f "$stamp" ]; then
-    local last
-    last=$(cat "$stamp" 2>/dev/null) || last=0
-    case "$last" in *[!0-9]*|"") last=0 ;; esac
-    [ $(( now - last )) -lt 1 ] && return 0
-  fi
-  printf '%s' "$now" > "$stamp" 2>/dev/null
-  /usr/bin/open -g "$url" >/dev/null 2>&1 || true
-}
-
 # inbox_listening [grace_s] — is anything on the other end?
 #
-# Raycast writes a heartbeat every time either command runs, and the menu bar runs
-# on a 10s interval. Without this the hook blocks for its full timeout whenever
-# Raycast is quit — a silent freeze before every permission prompt, for a UI that
-# was never going to answer. The nudge above may itself launch Raycast, so a stale
-# heartbeat gets a short grace period rather than an immediate no.
+# The app writes a heartbeat whenever it reads the inbox. Without this the hook
+# blocks for its full timeout whenever the app is not running — a silent freeze
+# before every permission prompt, in exchange for an answer that was never
+# coming. The grace period covers an app that is starting up.
 inbox_listening() {
   local grace=${1:-3} beat="$INBOX_DIR/heartbeat" deadline
   deadline=$(( $(date +%s) + grace ))

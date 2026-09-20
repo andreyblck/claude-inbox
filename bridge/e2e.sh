@@ -41,9 +41,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The stand-in for Raycast. The heartbeat matters as much as the verdict: the hook
+# The stand-in for the app. The heartbeat matters as much as the verdict: the hook
 # refuses to block when nothing is listening, so a harness that only writes
-# verdicts tests the "Raycast is quit" path by accident.
+# verdicts tests the "nothing is listening" path by accident.
 captured="$ROOT/captured.json"
 ( while :; do date +%s > "$CLAUDE_INBOX_DIR/heartbeat"; sleep 2; done ) & heart=$!
 if [ "$MODE" != silent ]; then

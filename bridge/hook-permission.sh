@@ -1,7 +1,7 @@
 #!/bin/bash
-# PermissionRequest — hand the decision to Raycast, and wait for it here.
+# PermissionRequest — hand the decision to the app, and wait for it here.
 #
-# This process IS the daemon: it holds the request open, and Raycast only has to
+# This process IS the daemon: it holds the request open, and the app only has to
 # drop a verdict file. On timeout we print nothing, and the usual terminal prompt
 # happens as if the bridge did not exist.
 set -uo pipefail
@@ -45,9 +45,8 @@ printf '%s' "$payload" | "$JQ" --arg req "$req" --argjson ts "$(date +%s)" --arg
   permission_suggestions: (.permission_suggestions // null)
 }' 2>/dev/null | inbox_write "$pending" || exit 0
 
-inbox_nudge
 
-# Blocking for the full timeout when Raycast is not running is a freeze before
+# Blocking for the full timeout when nothing is listening is a freeze before
 # every prompt, in exchange for an answer that was never coming.
 inbox_listening || exit 0
 
@@ -58,7 +57,7 @@ case "$decision" in
   allow|deny) ;;
   *) exit 0 ;;
 esac
-reason=$(printf '%s' "$verdict" | "$JQ" -r '.reason // "Answered in Raycast"' 2>/dev/null)
+reason=$(printf '%s' "$verdict" | "$JQ" -r '.reason // "Answered in Claude Inbox"' 2>/dev/null)
 
 # The contract, verbatim from the binary's own validator:
 #   {behavior: "allow", updatedInput?: object} | {behavior: "deny", message: string}

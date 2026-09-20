@@ -7,9 +7,9 @@ cd "$(dirname "$0")"
 export CLAUDE_INBOX_DIR="${TMPDIR:-/tmp}/claude-inbox-selftest.$$"
 trap 'rm -rf "$CLAUDE_INBOX_DIR"' EXIT
 
-# Stand in for Raycast. The hook refuses to block when nothing is listening, so
+# Stand in for the app. The hook refuses to block when nothing is listening, so
 # without this every wait below returns instantly and every assertion fails —
-# which is exactly what should happen when Raycast is not running.
+# which is exactly what should happen when the app is not running.
 beat() { mkdir -p "$CLAUDE_INBOX_DIR"; date +%s > "$CLAUDE_INBOX_DIR/heartbeat"; }
 
 PAYLOAD='{"hook_event_name":"PermissionRequest","session_id":"s-1","cwd":"/Users/me/work/skyaccess-api","tool_name":"Bash","tool_input":{"command":"rm -rf dist"},"permission_mode":"default","transcript_path":"/tmp/t.jsonl"}'
@@ -94,6 +94,11 @@ echo 'not json' > "$CLAUDE_INBOX_DIR/sessions/s-5.json"
 printf '%s' '{"hook_event_name":"Stop","session_id":"s-5","cwd":"/x","last_assistant_message":"ok"}' | ./hook-session.sh
 check "corrupt prev survived" "$(/usr/bin/jq -r .state "$CLAUDE_INBOX_DIR/sessions/s-5.json" 2>/dev/null)" "idle"
 
+echo "4c. a system event is not what someone asked for"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-6","cwd":"/x","prompt":"/morgan:pull дособери"}' | ./hook-session.sh
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-6","cwd":"/x","prompt":"<task-notification><task-id>a</task-id></task-notification>"}' | ./hook-session.sh
+check "real prompt kept" "$(/usr/bin/jq -r .last_prompt "$CLAUDE_INBOX_DIR/sessions/s-6.json")" "/morgan:pull дособери"
+
 echo "5. the pending record keeps what the UI and the grant need"
 ( for _ in $(seq 1 100); do
     f=$(ls "$CLAUDE_INBOX_DIR/pending"/*.json 2>/dev/null | head -1) || true
@@ -107,7 +112,7 @@ check "prompt_id"   "$(/usr/bin/jq -r '.prompt_id' "$CLAUDE_INBOX_DIR/captured.j
 check "suggestions" "$(/usr/bin/jq -r '.permission_suggestions[0].mode' "$CLAUDE_INBOX_DIR/captured.json")" "acceptEdits"
 
 echo "6. nothing is listening -> give the terminal back immediately"
-# A hook that blocks for its whole timeout with Raycast quit is a dead freeze
+# A hook that blocks for its whole timeout with nothing listening is a dead freeze
 # before every prompt, waiting on an answer that was never coming.
 rm -f "$CLAUDE_INBOX_DIR/heartbeat"
 start=$(date +%s)
@@ -139,17 +144,6 @@ mkdir -p "$CLAUDE_INBOX_DIR/pending"
 printf '%s' '{"hook_event_name":"Stop","session_id":"s-reap","cwd":"/x"}' | ./hook-session.sh
 check "dead pid swept"  "$([ -f "$CLAUDE_INBOX_DIR/pending/ghost.json" ] && echo kept || echo gone)" "gone"
 check "live pid kept"   "$([ -f "$CLAUDE_INBOX_DIR/pending/live.json" ] && echo kept || echo gone)" "kept"
-
-echo "10. no menu bar, no nudge"
-# Raycast answers a background deeplink to a command the user has not enabled with
-# an error toast — once per turn, per session, forever.
-echo 'raycast://extensions/x/y/z' > "$CLAUDE_INBOX_DIR/nudge-url"
-rm -f "$CLAUDE_INBOX_DIR/heartbeat-menubar" "$CLAUDE_INBOX_DIR/.nudged"
-( . ./lib.sh; inbox_nudge )
-check "stayed quiet"  "$([ -f "$CLAUDE_INBOX_DIR/.nudged" ] && echo nudged || echo quiet)" "quiet"
-date +%s > "$CLAUDE_INBOX_DIR/heartbeat-menubar"
-( . ./lib.sh; inbox_nudge )
-check "nudged once it exists" "$([ -f "$CLAUDE_INBOX_DIR/.nudged" ] && echo nudged || echo quiet)" "nudged"
 
 echo
 [ "$fail" = 0 ] && echo "all good" || { echo "FAILURES"; exit 1; }

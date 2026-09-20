@@ -294,7 +294,19 @@ export function rowTitle(project: string, ask: string): string {
  * left — but not one of 225 transcripts on this machine contained one, so
  * building on them would be building on nothing.
  */
-export function phaseOf(prompt?: string | null): string | undefined {
+export function userPrompt(prompt?: string | null): string | undefined {
+  const text = prompt?.trim();
+  if (!text) return undefined;
+  // Claude Code delivers system events through UserPromptSubmit too — task
+  // notifications, monitor events, re-wakes. They arrive in the same field as a
+  // person's words and they are not a person's words; showing one as the subject
+  // of a row is showing plumbing.
+  if (/^<[a-z][a-z0-9-]*>/i.test(text)) return undefined;
+  return text;
+}
+
+export function phaseOf(raw?: string | null): string | undefined {
+  const prompt = userPrompt(raw);
   if (!prompt) return undefined;
   const match = /^\s*\/([a-z0-9:_-]+)/i.exec(prompt);
   if (!match) return undefined;
@@ -351,7 +363,7 @@ export function subjectOf(session: SessionRecord, max: number = LIMITS.subject):
         // in the last moment, and that is often an aside — "без отправок в лс",
         // "давай доделывай". A row names the work, not the last correction.
         [session.title, false],
-        [session.last_prompt, false],
+        [userPrompt(session.last_prompt), false],
         [session.activity?.[0], false],
       ];
 

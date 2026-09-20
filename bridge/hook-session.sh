@@ -45,7 +45,10 @@ printf '%s' "$payload" | "$JQ" --arg state "$state" --arg event "$event" --argjs
   # What the person actually asked for. It arrives free on UserPromptSubmit, and
   # it is the difference between a row that says "working" and one that says what
   # the session is working on.
-  last_prompt: (.prompt // $prev.last_prompt // null),
+  # UserPromptSubmit also carries system events — task notifications, monitor
+  # wakes — in the same field a person types into. Keeping one would make a row
+  # say <task-notification> where it should say what was asked for.
+  last_prompt: ((.prompt | select(type == "string" and (test("^<[A-Za-z][A-Za-z0-9-]*>") | not))) // $prev.last_prompt // null),
   last_message: (.last_assistant_message // $prev.last_message // null)
 }' 2>/dev/null | inbox_write "$INBOX_DIR/sessions/$sid.json" || exit 0
 
@@ -53,5 +56,4 @@ printf '%s' "$payload" | "$JQ" --arg state "$state" --arg event "$event" --argjs
 # behind as a row that can never be cleared, and sessions/ grows one file per
 # session forever — all of them parsed on every poll.
 inbox_reap
-inbox_nudge
 exit 0

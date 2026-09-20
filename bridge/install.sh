@@ -4,7 +4,7 @@
 #   ./install.sh                 install into ${CLAUDE_CONFIG_DIR:-~/.claude}
 #   ./install.sh --dry-run       print the resulting settings.json, write nothing
 #   ./install.sh --uninstall     remove the hooks and give the status line back
-#   ./install.sh --wait 300      seconds the permission hook waits for Raycast
+#   ./install.sh --wait 300      seconds the permission hook waits for the app
 #
 # Every run backs the file up first and is idempotent: our entries are recognised
 # by script name, so installing twice — or installing after moving the repo —
@@ -176,7 +176,7 @@ if mode == "uninstall":
         # what says "nobody reports in any more" — not deleting the directory.
         registered.write_text("".join(f"{d}\n" for d in kept))
     # A pending row is a request some hook was holding open. Those hooks are gone
-    # now, so every one of them is a row Raycast can never resolve.
+    # now, so every one of them is a row nothing can ever resolve.
     removed = 0
     for stale in (inbox / "pending").glob("*.json"):
         stale.unlink(missing_ok=True)
@@ -192,8 +192,6 @@ else:
     for sub in ("sessions", "pending", "verdicts", "usage"):
         (inbox / sub).mkdir(exist_ok=True)
         os.chmod(inbox / sub, 0o700)
-    (inbox / "nudge-url").write_text(
-        "raycast://extensions/andreyblack/claude-inbox/menubar?launchType=background\n")
 
     # Record where we went. A config directory is an account, it owns its own
     # session registry, and the reader cannot guess it: assuming ~/.claude leaves
@@ -210,10 +208,7 @@ else:
     print(f"accounts    {', '.join(known)}")
     if previous:
         print(f"statusline  wrapping yours: {previous}")
-    print(f"permission  waits {wait}s for Raycast, then the terminal prompts as usual")
+    print(f"permission  waits {wait}s for the app, then the terminal prompts as usual")
     print("new sessions pick this up; sessions already running keep the hooks they started with")
-    print()
-    print("one manual step: enable \"Claude Sessions\" in Raycast (Settings -> Extensions ->")
-    print("Claude Inbox) so the menu bar item appears. Until it runs once, the bridge")
-    print("stays quiet rather than waking a command that is not there.")
+
 PY

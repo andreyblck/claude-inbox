@@ -57,7 +57,7 @@ chmod +x "$MOVED"/*.sh
 CLAUDE_CONFIG_DIR="$cfg" CLAUDE_INBOX_DIR="$ROOT/inbox-idem" "$MOVED/install.sh" >/dev/null
 check "still one permission hook" "$(jqs "$cfg/settings.json" '[.hooks.PermissionRequest[].hooks[]] | length')" "1"
 check "pointing at the new path"  "$(jqs "$cfg/settings.json" '.hooks.PermissionRequest[0].hooks[0].command | test("moved/bridge")')" "true"
-check "old path gone"             "$(jqs "$cfg/settings.json" '[.hooks[][].hooks[].command] | map(select(test("raycast-app/bridge"))) | length')" "0"
+check "old path gone"             "$(jqs "$cfg/settings.json" '[.hooks[][].hooks[].command] | map(select(test("/bridge$"))) | length')" "0"
 
 echo "4. other people's hooks are theirs"
 cfg=$(fresh cfg-foreign)
