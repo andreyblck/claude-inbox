@@ -1,0 +1,14 @@
+{
+  "name": "claude-inbox-spec",
+  "private": true,
+  "description": "The product's rules, as executable specification for the native port.",
+  "type": "module",
+  "scripts": {
+    "test": "node test/run.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3"
+  }
+}

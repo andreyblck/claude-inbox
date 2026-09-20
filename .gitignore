@@ -4,3 +4,5 @@ spikes/captured/*.json
 extension/dist/
 *.log
 .camp/
+app/.build/
+app/build/

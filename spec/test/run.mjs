@@ -1,7 +1,9 @@
 /**
- * Bundle the tests with `@raycast/api` aliased to the stub, then hand them to
- * node's test runner. Bundling is the only way in: the real package resolves to
- * nothing outside Raycast, and lib/ imports it for two enums.
+ * Bundle the tests, then hand them to node's test runner.
+ *
+ * These are the rules the native app has to satisfy. They describe the product,
+ * not a toolkit — nothing here imports a UI library — so they stay the port's
+ * specification and its check: run them beside the Swift and compare.
  */
 import { build } from "esbuild";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
@@ -31,7 +33,6 @@ await build({
   sourcemap: "inline",
   // node:test is resolved by the runtime, not bundled in
   external: ["node:*"],
-  alias: { "@raycast/api": join(here, "raycast-stub.ts") },
   // The bundle runs from a temp dir, so import.meta.dirname points at the temp
   // dir, not at the source tree. Anything on disk has to be baked in here.
   define: { __BRIDGE_DIR__: JSON.stringify(bridge) },

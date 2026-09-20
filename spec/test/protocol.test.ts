@@ -14,8 +14,7 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
-import { setPreferences } from "@raycast/api";
-import { writeVerdict } from "../src/lib/inbox";
+import { writeVerdict } from "../lib/inbox";
 
 declare const __BRIDGE_DIR__: string;
 const HOOK = resolve(__BRIDGE_DIR__, "hook-permission.sh");
@@ -35,7 +34,7 @@ let inbox: string;
 
 before(async () => {
   inbox = await mkdtemp(join(tmpdir(), "claude-inbox-protocol-"));
-  setPreferences({ inboxDir: inbox });
+  process.env.CLAUDE_INBOX_DIR = inbox;
 });
 
 /** What `touchHeartbeat` writes: without it the hook refuses to block at all. */

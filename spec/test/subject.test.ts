@@ -8,7 +8,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { readSessionSummary, readTurnNarration } from "../src/lib/inbox";
+import { readSessionSummary, readTurnNarration } from "../lib/inbox";
 import {
   bySeverity,
   lastSentence,
@@ -18,7 +18,7 @@ import {
   subjectOf,
   type InboxState,
   type SessionRecord,
-} from "../src/lib/state";
+} from "../lib/state";
 
 function session(over: Partial<SessionRecord> & { state: InboxState }): SessionRecord {
   return { session_id: "s", ts: Math.round(Date.now() / 1000), ...over };

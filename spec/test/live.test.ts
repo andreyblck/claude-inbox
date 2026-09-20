@@ -12,8 +12,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { setPreferences } from "@raycast/api";
-import { readLiveSessions, transcriptPathFor } from "../src/lib/inbox";
+import { readLiveSessions, transcriptPathFor } from "../lib/inbox";
 
 /** A registry pointing at this very process: alive by construction. */
 async function registryWith(rows: Record<string, unknown>[]) {
@@ -24,7 +23,7 @@ async function registryWith(rows: Record<string, unknown>[]) {
   for (const row of rows) {
     await writeFile(join(config, "sessions", `${row.pid}.json`), JSON.stringify(row), "utf8");
   }
-  setPreferences({ inboxDir: inbox });
+  process.env.CLAUDE_INBOX_DIR = inbox;
   return { inbox, config };
 }
 
@@ -87,7 +86,7 @@ describe("who is alive", () => {
   it("says so when there is no registry to read", async () => {
     const inbox = await mkdtemp(join(tmpdir(), "claude-inbox-none-"));
     await writeFile(join(inbox, "config-dirs"), `${join(inbox, "nowhere")}\n`, "utf8");
-    setPreferences({ inboxDir: inbox });
+  process.env.CLAUDE_INBOX_DIR = inbox;
     const { sessions, observed } = await readLiveSessions();
     assert.deepEqual(sessions, []);
     assert.equal(observed, false, "unknown liveness must not read as 'everything finished'");

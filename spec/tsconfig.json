@@ -1,17 +1,23 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "include": ["src/**/*"],
+  "include": [
+    "lib/**/*",
+    "test/**/*"
+  ],
   "compilerOptions": {
-    "lib": ["ES2023"],
+    "lib": [
+      "ES2023"
+    ],
     "module": "esnext",
     "target": "ES2022",
     "strict": true,
     "isolatedModules": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "jsx": "react-jsx",
-    "resolveJsonModule": true,
     "moduleResolution": "bundler",
-    "types": ["node", "react"]
+    "noEmit": true,
+    "types": [
+      "node"
+    ]
   }
 }

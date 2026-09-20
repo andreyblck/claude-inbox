@@ -5,7 +5,13 @@
  * these values but must never invent a label, a colour or a truncation of their
  * own — that is the one rule that keeps the menu bar from turning into mush.
  */
-import { Color, Icon } from "@raycast/api";
+/**
+ * Semantic names, not a toolkit's enum. The UI layer decides what a `lock` looks
+ * like — an SF Symbol, an asset, a glyph in a menu — and this file stays true
+ * whichever one is asking.
+ */
+export type Tint = "yellow" | "orange" | "blue" | "green" | "red" | "secondary";
+export type Glyph = "lock" | "question" | "plan" | "alert" | "busy" | "speech" | "done" | "failed";
 
 export type InboxState =
   | "blocked.permission"
@@ -22,28 +28,28 @@ export type StateGroup = "waiting" | "answered" | "running" | "finished";
 type StateMeta = {
   /** Sentence-case, shown as an accessory tag. */
   label: string;
-  icon: Icon;
-  tint: Color;
+  icon: Glyph;
+  tint: Tint;
   group: StateGroup;
   /** Sort key inside a group: lower comes first. */
   rank: number;
 };
 
 export const STATES: Record<InboxState, StateMeta> = {
-  "blocked.permission": { label: "Permission", icon: Icon.Lock, tint: Color.Yellow, group: "waiting", rank: 0 },
-  "blocked.question": { label: "Question", icon: Icon.QuestionMarkCircle, tint: Color.Yellow, group: "waiting", rank: 1 },
-  "blocked.plan": { label: "Plan", icon: Icon.List, tint: Color.Yellow, group: "waiting", rank: 2 },
+  "blocked.permission": { label: "Permission", icon: "lock", tint: "yellow", group: "waiting", rank: 0 },
+  "blocked.question": { label: "Question", icon: "question", tint: "yellow", group: "waiting", rank: 1 },
+  "blocked.plan": { label: "Plan", icon: "plan", tint: "yellow", group: "waiting", rank: 2 },
   // Trust and MCP-consent dialogs cannot be answered anywhere but the terminal,
   // so they are orange, not yellow: the only useful action is "take me there".
-  "blocked.dialog": { label: "Needs terminal", icon: Icon.ExclamationMark, tint: Color.Orange, group: "waiting", rank: 3 },
-  working: { label: "Working", icon: Icon.CircleFilled, tint: Color.Blue, group: "running", rank: 0 },
+  "blocked.dialog": { label: "Needs terminal", icon: "alert", tint: "orange", group: "waiting", rank: 3 },
+  working: { label: "Working", icon: "busy", tint: "blue", group: "running", rank: 0 },
   // A finished turn is not the same kind of quiet as a busy one: the session said
   // something and is waiting for it to be read. That is the whole reason this
   // product exists — knowing what came back without visiting twelve terminals —
   // and it spent its life buried in "Running" as a grey dot.
-  idle: { label: "Answered", icon: Icon.SpeechBubble, tint: Color.SecondaryText, group: "answered", rank: 0 },
-  done: { label: "Done", icon: Icon.CheckCircle, tint: Color.Green, group: "finished", rank: 0 },
-  failed: { label: "Failed", icon: Icon.XMarkCircle, tint: Color.Red, group: "finished", rank: 1 },
+  idle: { label: "Answered", icon: "speech", tint: "secondary", group: "answered", rank: 0 },
+  done: { label: "Done", icon: "done", tint: "green", group: "finished", rank: 0 },
+  failed: { label: "Failed", icon: "failed", tint: "red", group: "finished", rank: 1 },
 };
 
 const GROUP_ORDER: Record<StateGroup, number> = { waiting: 0, answered: 1, running: 2, finished: 3 };

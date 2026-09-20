@@ -2,7 +2,6 @@
  * Reading and writing the bridge's directory. The whole IPC surface lives here:
  * views never touch the filesystem themselves.
  */
-import { getPreferenceValues } from "@raycast/api";
 import { execFileSync } from "child_process";
 import { open as fsOpen, mkdir, readdir, readFile, rename, writeFile } from "fs/promises";
 import { homedir } from "os";
@@ -29,8 +28,8 @@ function expandHome(path: string): string {
 }
 
 export function inboxDir(): string {
-  const pref = getPreferenceValues<{ inboxDir?: string }>().inboxDir?.trim();
-  if (pref) return expandHome(pref);
+  const configured = process.env.CLAUDE_INBOX_DIR?.trim();
+  if (configured) return expandHome(configured);
   return join(homedir(), ".claude", "inbox");
 }
 

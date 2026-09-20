@@ -5,8 +5,8 @@
  */
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
-import { mergeRows, type LiveRegistry } from "../src/lib/inbox";
-import { bySeverity, STATES, type InboxState, type SessionRecord } from "../src/lib/state";
+import { mergeRows, type LiveRegistry } from "../lib/inbox";
+import { bySeverity, STATES, type InboxState, type SessionRecord } from "../lib/state";
 
 const NOW = Math.round(Date.now() / 1000);
 

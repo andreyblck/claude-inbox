@@ -1,6 +1,5 @@
 /** Formatting that both views share. Nothing here reaches the filesystem. */
-import { Color } from "@raycast/api";
-import { age, oneLine, truncate } from "./state";
+import { age, oneLine, truncate, type Tint } from "./state";
 import type { UsageRecord } from "./inbox";
 
 /** "resets in 2h 14m" — a countdown answers "can I keep going", a timestamp doesn't. */
@@ -17,10 +16,10 @@ export function resetsIn(resetsAt?: number | null, now = Date.now()): string | u
 }
 
 /** One scale for every usage number in the product. */
-export function usageTint(percentage: number): Color {
-  if (percentage >= 90) return Color.Red;
-  if (percentage >= 70) return Color.Yellow;
-  return Color.SecondaryText;
+export function usageTint(percentage: number): Tint {
+  if (percentage >= 90) return "red";
+  if (percentage >= 70) return "yellow";
+  return "secondary";
 }
 
 export function pct(value?: number | null): string | undefined {
