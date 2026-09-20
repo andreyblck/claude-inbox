@@ -7,7 +7,7 @@ import { execFileSync } from "child_process";
 import { open as fsOpen, mkdir, readdir, readFile, rename, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { basename, join } from "path";
-import type { InboxState, PendingItem, SessionRecord } from "./state";
+import { oneLine, phaseOf, type InboxState, type PendingItem, type SessionRecord } from "./state";
 
 export type UsageRecord = {
   ts: number;
@@ -286,28 +286,148 @@ export function accountLabel(configDir: string): string {
   return base === ".claude" ? "default" : base.replace(/^\.?claude-?/, "") || base;
 }
 
+/** Read the last `bytes` of a file as text. Transcripts reach hundreds of MB. */
+async function readTail(path: string, bytes: number): Promise<string | undefined> {
+  try {
+    const fh = await fsOpen(path, "r");
+    try {
+      const { size } = await fh.stat();
+      const start = Math.max(0, size - bytes);
+      const chunk = Buffer.alloc(Math.min(bytes, size));
+      await fh.read(chunk, 0, chunk.length, start);
+      return chunk.toString("utf8");
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Claude Code writes its own generated title for a session into the transcript,
+ * as a line of `{"type": "ai-title", "aiTitle": "…"}`. It rewrites it as the
+ * session goes on, so the newest one is near the end — measured at 0.7–3.7 KB
+ * from the end across real transcripts, including one of 4.5 MB.
+ *
+ * This is the difference between a row that reads "skyaccess-48 · working" and
+ * one that reads "skyaccess-48 · Optics для pricing review email".
+ */
+const SUMMARY_TAIL = 64 * 1024;
+const SUMMARY_TTL_MS = 20_000;
+
+export type SessionSummary = { title?: string; doing?: string };
+
+const summaryCache = new Map<string, { at: number; summary: SessionSummary }>();
+
+/**
+ * The interesting half of a shell command.
+ *
+ * Commands arrive as `cd /long/absolute/path && npm test`, and the path is the
+ * part nobody needs: it is the project, which the row already says. What is left
+ * is what the session is actually doing.
+ */
+function commandGist(command: string): string {
+  // A heredoc is a whole script on one line; the interpreter is the only part of
+  // it that reads as anything.
+  const head = command.split(/<<[-~]?['"]?\w/)[0];
+  const parts = oneLine(head)
+    .split(/&&|;|\|\|/)
+    .map((part) => part.trim())
+    .filter((part) => part && !/^cd\s/.test(part) && !/^(export|source|\.)\s/.test(part));
+  return parts[0] || oneLine(head) || oneLine(command);
+}
+
+/** `Bash · npm test` -> "running npm test". A row is read, not parsed. */
+function describeTool(name: string, input?: Record<string, unknown>): string {
+  const str = (key: string) => (typeof input?.[key] === "string" ? (input[key] as string) : undefined);
+  const file = () => str("file_path")?.split("/").pop();
+  switch (name) {
+    case "Bash": {
+      const command = str("command");
+      return `running ${command ? commandGist(command) : "a command"}`;
+    }
+    case "Read":
+      return `reading ${file() ?? "a file"}`;
+    case "Edit":
+    case "Write":
+    case "NotebookEdit":
+      return `editing ${file() ?? "a file"}`;
+    case "Grep":
+    case "Glob":
+      return `searching for ${oneLine(str("pattern") ?? "something")}`;
+    case "WebSearch":
+    case "WebFetch":
+      return "looking something up";
+    case "Task":
+    case "Agent":
+      return `running ${oneLine(str("description") ?? "an agent")}`;
+    default:
+      return name.startsWith("mcp__") ? `using ${name.split("__")[1] ?? "an integration"}` : `using ${name}`;
+  }
+}
+
+/**
+ * What a session is about, and what it is doing — from one read of the tail.
+ *
+ * Claude Code writes its own generated title into the transcript as a line of
+ * `{"type": "ai-title", "aiTitle": "…"}` and rewrites it as the session goes on,
+ * so the newest one sits near the end: measured at 0.7–3.7 KB from the end across
+ * real transcripts, including one of 4.5 MB. The newest `tool_use` is right there
+ * too, which is the difference between a row that reads "skyaccess-48 · working"
+ * and one that reads "skyaccess-48 · Optics для pricing review email".
+ */
+export async function readSessionSummary(transcriptPath?: string): Promise<SessionSummary> {
+  if (!transcriptPath) return {};
+  const cached = summaryCache.get(transcriptPath);
+  // Every row wants this on every poll; re-reading a dozen transcripts once a
+  // second buys nothing, because neither value changes that fast.
+  if (cached && Date.now() - cached.at < SUMMARY_TTL_MS) return cached.summary;
+
+  const summary: SessionSummary = {};
+  const buf = await readTail(transcriptPath, SUMMARY_TAIL);
+  if (buf) {
+    const lines = buf.split("\n");
+    for (let i = lines.length - 1; i >= 0 && !(summary.title && summary.doing); i--) {
+      const line = lines[i].trim();
+      if (!line.startsWith("{")) continue;
+      try {
+        const row = JSON.parse(line) as {
+          type?: string;
+          aiTitle?: string;
+          message?: { content?: unknown };
+        };
+        if (!summary.title && row.type === "ai-title" && row.aiTitle) summary.title = row.aiTitle;
+        if (!summary.doing && Array.isArray(row.message?.content)) {
+          for (let j = row.message.content.length - 1; j >= 0; j--) {
+            const block = row.message.content[j] as {
+              type?: string;
+              name?: string;
+              input?: Record<string, unknown>;
+            };
+            if (block.type === "tool_use" && block.name) {
+              summary.doing = describeTool(block.name, block.input);
+              break;
+            }
+          }
+        }
+      } catch {
+        // truncated first line of the window, expected
+      }
+    }
+  }
+  summaryCache.set(transcriptPath, { at: Date.now(), summary });
+  return summary;
+}
+
 /**
  * The last few things a session did, for the detail pane.
  * Transcripts grow to hundreds of megabytes, so only the tail is read.
  */
 export async function readRecentActivity(transcriptPath?: string, maxTools = 6): Promise<string[]> {
   if (!transcriptPath) return [];
-  const TAIL = 192 * 1024;
-  let buf: string;
-  try {
-    const fh = await fsOpen(transcriptPath, "r");
-    try {
-      const { size } = await fh.stat();
-      const start = Math.max(0, size - TAIL);
-      const chunk = Buffer.alloc(Math.min(TAIL, size));
-      await fh.read(chunk, 0, chunk.length, start);
-      buf = chunk.toString("utf8");
-    } finally {
-      await fh.close();
-    }
-  } catch {
-    return [];
-  }
+  const buf = await readTail(transcriptPath, 192 * 1024);
+  if (!buf) return [];
 
   const tools: string[] = [];
   const lines = buf.split("\n");
@@ -336,6 +456,23 @@ export async function readRecentActivity(transcriptPath?: string, maxTools = 6):
     }
   }
   return tools;
+}
+
+/**
+ * Fill in what makes a row readable: the session's own title, and the step it
+ * declared. Both views need this, so neither gets to do it its own way.
+ */
+export async function enrichRows(rows: Row[]): Promise<Row[]> {
+  return Promise.all(
+    rows.map(async (row) => {
+      if (row.kind !== "session") return row;
+      const summary = await readSessionSummary(row.session.transcript_path);
+      const title = row.session.title ?? summary.title;
+      const phase = row.session.phase ?? phaseOf(row.session.last_prompt);
+      const activity = summary.doing ? [summary.doing] : row.session.activity;
+      return { ...row, session: { ...row.session, title, phase, activity } };
+    }),
+  );
 }
 
 export type Row =

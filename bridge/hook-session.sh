@@ -25,7 +25,15 @@ case "$event" in
   *)                             exit 0 ;;
 esac
 
-printf '%s' "$payload" | "$JQ" --arg state "$state" --arg event "$event" --argjson ts "$(date +%s)" '{
+# Each event carries only part of the picture: Stop has the last message and no
+# prompt, UserPromptSubmit the reverse, SessionEnd neither. Overwriting the record
+# each time threw the other half away — a finished session lost the very thing
+# worth reading about it.
+prev=$(cat "$INBOX_DIR/sessions/$sid.json" 2>/dev/null) || prev="{}"
+printf '%s' "$prev" | "$JQ" -e 'type == "object"' >/dev/null 2>&1 || prev="{}"
+
+printf '%s' "$payload" | "$JQ" --arg state "$state" --arg event "$event" --argjson ts "$(date +%s)" \
+  --argjson prev "$prev" '{
   session_id: .session_id,
   state: $state,
   ts: $ts,
@@ -34,7 +42,11 @@ printf '%s' "$payload" | "$JQ" --arg state "$state" --arg event "$event" --argjs
   permission_mode: .permission_mode,
   transcript_path: .transcript_path,
   end_reason: (.reason // null),
-  last_message: (.last_assistant_message // null)
+  # What the person actually asked for. It arrives free on UserPromptSubmit, and
+  # it is the difference between a row that says "working" and one that says what
+  # the session is working on.
+  last_prompt: (.prompt // $prev.last_prompt // null),
+  last_message: (.last_assistant_message // $prev.last_message // null)
 }' 2>/dev/null | inbox_write "$INBOX_DIR/sessions/$sid.json" || exit 0
 
 # Nothing else ever sweeps the inbox: a SIGKILLed hook leaves its pending file

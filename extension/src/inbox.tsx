@@ -3,6 +3,7 @@ import { getProgressIcon, usePromise } from "@raycast/utils";
 import { useEffect, useMemo, useState } from "react";
 import {
   accountLabel,
+  enrichRows,
   mergeRows,
   readPending,
   readLiveSessions,
@@ -21,9 +22,11 @@ import {
   askPhrase,
   bySeverity,
   GROUP_TITLES,
+  oneLine,
   projectName,
   rowTitle,
   STATES,
+  subjectOf,
   type StateGroup,
 } from "./lib/state";
 
@@ -47,7 +50,8 @@ function useInbox() {
       readLiveSessions(),
       readUsage(),
     ]);
-    return { rows: mergeRows(pending, sessions, live).sort(bySeverity), usage };
+    const rows = await enrichRows(mergeRows(pending, sessions, live).sort(bySeverity));
+    return { rows, usage };
   });
   useInterval(revalidate, ROWS_POLL_MS);
   return {
@@ -69,8 +73,8 @@ function rowProject(row: Row): string {
 
 function rowAsk(row: Row): string {
   if (row.kind === "pending") return askPhrase(row.pending);
-  // A dialog the terminal owns says what it wants; that beats the state name.
-  return row.session.waiting_for ?? row.session.phase ?? STATES[row.state].label.toLowerCase();
+  // A dialog the terminal owns says what it wants; that beats anything we infer.
+  return row.session.waiting_for ?? subjectOf(row.session, 64);
 }
 
 function rowTranscript(row: Row): string | undefined {
@@ -84,10 +88,14 @@ function Detail({ row, activity }: { row: Row; activity: string[] }) {
   const mode = row.kind === "pending" ? row.pending.permission_mode : row.session.permission_mode;
   const lastMessage = row.kind === "session" ? row.session.last_message : undefined;
 
+  const prompt = row.kind === "session" ? row.session.last_prompt : undefined;
   const markdown = [
     `## ${rowAsk(row)}`,
     "",
     codeBlock(command),
+    // What was actually asked for, when the row's title is a generated summary
+    // of it rather than the thing itself.
+    prompt && prompt.trim() !== rowAsk(row) ? `> ${oneLine(prompt).slice(0, 400)}\n` : "",
     lastMessage ? `${lastMessage.slice(0, 600)}\n` : "",
     activityLine(activity),
   ]
@@ -217,8 +225,18 @@ export default function Command() {
                   key={row.id}
                   id={row.id}
                   icon={{ source: meta.icon, tintColor: meta.tint }}
-                  title={rowTitle(rowProject(row), rowAsk(row))}
-                  accessories={[{ tag: { value: meta.label, color: meta.tint } }, { text: age(row.ts) }]}
+                  // The window has two panes and room to breathe, so the subject
+                  // gets the title line and the project steps back into the
+                  // subtitle. In a list you scan titles, not prefixes.
+                  title={rowAsk(row)}
+                  subtitle={rowProject(row)}
+                  accessories={[
+                    ...(row.kind === "session" && row.session.phase
+                      ? [{ tag: { value: row.session.phase, color: meta.tint } }]
+                      : []),
+                    { tag: { value: meta.label, color: meta.tint } },
+                    { text: age(row.ts) },
+                  ]}
                   detail={<Detail row={row} activity={selectedId === row.id ? (activity ?? []) : []} />}
                   actions={
                     <ActionPanel>

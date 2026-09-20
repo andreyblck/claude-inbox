@@ -58,6 +58,13 @@ export const LIMITS = {
   project: 18,
   /** Characters of the "what it wants" phrase in a row. */
   ask: 28,
+  /**
+   * Characters of what a running session is *about*. Longer than `ask` on
+   * purpose: "run rm -rf dist" says everything in 15 characters, while a real
+   * subject — "Optics для pricing review email" — is the whole value of the row
+   * and truncating it to a verb phrase throws that value away.
+   */
+  subject: 38,
   /** Characters of a command echoed into a single-line row. */
   commandInline: 24,
 } as const;
@@ -103,8 +110,14 @@ export type SessionRecord = {
   /** The config directory this session belongs to — an account. */
   config_dir?: string;
   demo?: boolean;
-  /** Set by the Morgan phase reporter: "track", "pull", "clean"… */
+  /** The step the session is on, when it declared one: "track", "pull", "clean". */
   phase?: string;
+  /** What the person last asked for. Arrives free on UserPromptSubmit. */
+  last_prompt?: string | null;
+  /** Claude Code's own generated title for the session, from the transcript. */
+  title?: string | null;
+  /** The last few things the session did, newest first. */
+  activity?: string[];
   permission_mode?: string;
   transcript_path?: string;
   last_message?: string | null;
@@ -203,6 +216,56 @@ export function rowTitle(project: string, ask: string): string {
  * waiting, and the only question a person asks of that section is "what just
  * landed?". Sorting results oldest-first buries the answer.
  */
+/**
+ * The step a session declared, from the slash command that started the turn:
+ * `/morgan:track fix the icon` -> "track".
+ *
+ * This is the only declaration of intent that exists in the data. Claude Code's
+ * todo lists would be better — they carry an explicit current step and what is
+ * left — but not one of 225 transcripts on this machine contained one, so
+ * building on them would be building on nothing.
+ */
+export function phaseOf(prompt?: string | null): string | undefined {
+  if (!prompt) return undefined;
+  const match = /^\s*\/([a-z0-9:_-]+)/i.exec(prompt);
+  if (!match) return undefined;
+  const name = match[1].split(":").pop();
+  if (!name) return undefined;
+  return truncate(name.replace(/[-_]+/g, " "), LIMITS.ask);
+}
+
+/**
+ * What a session is about, in the person's own words.
+ *
+ * The state is already in the icon, so spending the row's only line on "working"
+ * says nothing twice — that was the whole complaint about the first version.
+ *
+ * Order is by how much each source tells you, and it differs by whether the
+ * session is still going. For a running one you want the goal and then the
+ * current move; for a finished one the only question is what landed.
+ */
+export function subjectOf(session: SessionRecord, max: number = LIMITS.subject): string {
+  const clean = (value?: string | null) => {
+    const text = value?.trim();
+    if (!text) return undefined;
+    // The slash command is shown as the phase; repeating it here costs the
+    // characters that carry the actual request.
+    const body = oneLine(text.replace(/^\s*\/[a-z0-9:_-]+\s*/i, ""));
+    return body || undefined;
+  };
+
+  const finished = STATES[session.state].group === "finished";
+  const candidates = finished
+    ? [session.title, session.last_message, session.last_prompt]
+    : [session.title, session.last_prompt, session.activity?.[0], session.last_message];
+
+  for (const candidate of candidates) {
+    const text = clean(candidate);
+    if (text) return truncate(text, max);
+  }
+  return STATES[session.state].label.toLowerCase();
+}
+
 export function bySeverity(a: { state: InboxState; ts: number }, b: { state: InboxState; ts: number }): number {
   const ma = STATES[a.state];
   const mb = STATES[b.state];

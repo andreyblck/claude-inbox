@@ -79,6 +79,21 @@ check "SessionEnd"        "$(sess '{"hook_event_name":"SessionEnd","session_id":
 check "end reason kept"   "$(/usr/bin/jq -r .end_reason "$CLAUDE_INBOX_DIR/sessions/s-2.json")" "clear"
 check "hooks stay silent" "$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-3","cwd":"/x","prompt":"hi"}' | ./hook-session.sh)" ""
 
+echo "4b. each event carries half the picture; the record keeps both halves"
+# Stop has the last message and no prompt, UserPromptSubmit the reverse, SessionEnd
+# neither. Overwriting threw the other half away, and a finished session lost the
+# one thing worth reading about it.
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-4","cwd":"/x","prompt":"/morgan:pull дособери фичу"}' | ./hook-session.sh
+printf '%s' '{"hook_event_name":"Stop","session_id":"s-4","cwd":"/x","last_assistant_message":"Done, tests green."}' | ./hook-session.sh
+printf '%s' '{"hook_event_name":"SessionEnd","session_id":"s-4","cwd":"/x","reason":"clear"}' | ./hook-session.sh
+check "prompt survives"  "$(/usr/bin/jq -r .last_prompt  "$CLAUDE_INBOX_DIR/sessions/s-4.json")" "/morgan:pull дособери фичу"
+check "message survives" "$(/usr/bin/jq -r .last_message "$CLAUDE_INBOX_DIR/sessions/s-4.json")" "Done, tests green."
+check "state is final"   "$(/usr/bin/jq -r .state        "$CLAUDE_INBOX_DIR/sessions/s-4.json")" "done"
+# A corrupt previous record must not take the next write down with it.
+echo 'not json' > "$CLAUDE_INBOX_DIR/sessions/s-5.json"
+printf '%s' '{"hook_event_name":"Stop","session_id":"s-5","cwd":"/x","last_assistant_message":"ok"}' | ./hook-session.sh
+check "corrupt prev survived" "$(/usr/bin/jq -r .state "$CLAUDE_INBOX_DIR/sessions/s-5.json" 2>/dev/null)" "idle"
+
 echo "5. the pending record keeps what the UI and the grant need"
 ( for _ in $(seq 1 100); do
     f=$(ls "$CLAUDE_INBOX_DIR/pending"/*.json 2>/dev/null | head -1) || true

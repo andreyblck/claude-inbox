@@ -90,8 +90,35 @@ Rules that keep it from turning into mush:
    `subtitle` for time or shortcut. If it does not fit, it gets truncated, not folded.
 2. **Project** = basename of `cwd` (or the session name when set), 18 chars max.
    Never a path, never a UUID.
-3. **What** = a lowercase verb phrase, 28 chars max: `run rm -rf dist`, `pick one of 3`,
-   `approve plan`. For a running session it is the phase, not the tool.
+3. **What** = for a blocked session, a lowercase verb phrase, 28 chars max:
+   `run rm -rf dist`, `pick one of 3`, `approve plan`.
+
+   For a running one it is **the subject, up to 38 chars** — what the session is
+   *about*, not what state it is in. The state is already the glyph, so a row
+   reading `skyaccess-48 · working` spends its only line saying nothing twice.
+   In order of how much each tells you:
+
+   | Source | Example | Where it comes from |
+   |---|---|---|
+   | Claude Code's own title | `Optics для pricing review email` | `ai-title` in the transcript, rewritten each turn |
+   | what was last asked | `дособери фичу` | `prompt` on `UserPromptSubmit`, free |
+   | what it is doing now | `running npm test` | newest `tool_use` in the transcript |
+   | what landed | `Shipped. Tests pass, PR opened.` | `last_assistant_message` on `Stop` |
+   | the state | `working` | last resort, and an admission we know nothing |
+
+   A finished row reverses the middle two: nothing there is in flight, and the
+   only question anyone asks of that section is what came out of it.
+
+   The title is written in whatever language the person was speaking, which is
+   the point — it is their sentence, not ours.
+
+3a. **Step** = the slash command that opened the turn (`/morgan:track` → `track`),
+   shown in the right-hand subtitle beside the age. It is the only declaration of
+   intent that exists in the data, so a session that declared none shows none.
+   Claude Code's todo lists would be better — an explicit current step and what is
+   left — but not one of 225 transcripts on this machine contained one, and a
+   board built on an empty source is a board that is always empty. "What comes
+   next" is therefore not shown at all rather than guessed at.
 4. **Five rows per section**, the rest collapse into a `⋯ N more` submenu.
 5. **Empty sections vanish.** No "Nothing here" placeholders in a menu.
 6. **⌘1…⌘9 belong to the *Waiting* section only.** They open the inbox on that

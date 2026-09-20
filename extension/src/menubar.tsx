@@ -1,6 +1,7 @@
 import { Icon, LaunchType, MenuBarExtra, launchCommand } from "@raycast/api";
 import { usePromise } from "@raycast/utils";
 import {
+  enrichRows,
   mergeRows,
   readLiveSessions,
   readPending,
@@ -11,7 +12,7 @@ import {
   type Row,
 } from "./lib/inbox";
 import { usageLine, usagePeak } from "./lib/format";
-import { age, askPhrase, bySeverity, GROUP_TITLES, LIMITS, projectName, rowTitle, STATES } from "./lib/state";
+import { age, askPhrase, bySeverity, GROUP_TITLES, LIMITS, projectName, rowTitle, STATES, subjectOf } from "./lib/state";
 
 /** Above this, usage stops being weather and takes over the bar glyph. */
 const USAGE_ALERT = 90;
@@ -24,8 +25,14 @@ function project(row: Row): string {
 
 function ask(row: Row): string {
   if (row.kind === "pending") return askPhrase(row.pending);
-  // A dialog the terminal owns says what it wants; that beats the state name.
-  return row.session.waiting_for ?? row.session.phase ?? STATES[row.state].label.toLowerCase();
+  // A dialog the terminal owns says what it wants; that beats anything we infer.
+  return row.session.waiting_for ?? subjectOf(row.session);
+}
+
+/** Right-hand text: the step, when the session declared one, and always the age. */
+function trailing(row: Row): string {
+  const phase = row.kind === "session" ? row.session.phase : undefined;
+  return phase ? `${phase} · ${age(row.ts)}` : age(row.ts);
 }
 
 /** Five rows, then a submenu. A menu that scrolls has already failed. */
@@ -42,7 +49,8 @@ export default function Command() {
       readLiveSessions(),
       readUsage(),
     ]);
-    return { rows: mergeRows(pending, sessions, live).sort(bySeverity), usage };
+    const rows = await enrichRows(mergeRows(pending, sessions, live).sort(bySeverity));
+    return { rows, usage };
   });
 
   const rows = data?.rows ?? [];
@@ -72,7 +80,7 @@ export default function Command() {
         key={row.id}
         icon={STATES[row.state].icon}
         title={rowTitle(project(row), ask(row))}
-        subtitle={age(row.ts)}
+        subtitle={trailing(row)}
         // Opening is the safe default; ⌥ turns the row into an approval, so a
         // tool call is never allowed by a misclick.
         shortcut={withApprove && index < 9 ? { modifiers: ["cmd"], key: String(index + 1) as "1" } : undefined}
