@@ -16,9 +16,14 @@ APP="build/$NAME.app"
 swift build -c "$CONFIG" >&2
 BIN=$(swift build -c "$CONFIG" --show-bin-path 2>/dev/null)/"$NAME"
 
+# The icon is the picture on every notification banner, so it is part of the
+# build rather than something remembered later.
+[ -f build/$NAME.icns ] || swift icon.swift >&2
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$NAME"
+[ -f build/$NAME.icns ] && cp "build/$NAME.icns" "$APP/Contents/Resources/$NAME.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,6 +39,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>$NAME</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <!-- menu bar only: no dock icon, no app switcher entry -->
+  <key>CFBundleIconFile</key><string>$NAME</string>
   <key>LSUIElement</key><true/>
 </dict>
 </plist>

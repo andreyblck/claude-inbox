@@ -6,14 +6,66 @@ struct InboxView: View {
     @Bindable var store: InboxStore
     @State private var contentHeight: CGFloat = 0
     @State private var composing = false
+    @State private var query = ""
+    @State private var cursor = 0
+    @FocusState private var searching: Bool
+
+    /// Everything the keyboard can land on, in the order it is drawn.
+    private var visible: [Row] {
+        guard !query.isEmpty else { return store.rows }
+        let needle = query.lowercased()
+        return store.rows.filter { row in
+            Self.haystack(row).lowercased().contains(needle)
+        }
+    }
+
+    private static func haystack(_ row: Row) -> String {
+        switch row {
+        case .pending(let p):
+            Format.projectName(cwd: p.cwd, fallback: p.sessionId, name: nil) + " " + Format.askPhrase(p, max: 200)
+        case .session(let s):
+            Format.projectName(cwd: s.cwd, fallback: s.sessionId, name: s.name)
+                + " " + Format.subject(s, max: 300) + " " + (s.phase ?? "")
+        }
+    }
+
+    private func rows(in group: StateGroup) -> [Row] {
+        visible.filter { $0.state.group == group }
+    }
+
+    private var focusedID: String? {
+        visible.indices.contains(cursor) ? visible[cursor].id : nil
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             Header(store: store, composing: $composing)
+            search
             Divider().opacity(0.5)
 
             if composing {
                 NewTask(store: store, composing: $composing)
+                Divider().opacity(0.5)
+            }
+            // Silence that looks like nothing happening, but is a permission
+            // nobody was told about, is the worst failure this app can have.
+            if Notifier.shared.settled == true, !Notifier.shared.authorized {
+                HStack(spacing: Theme.Space.snug) {
+                    Image(systemName: "bell.slash")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.orange)
+                    Text("Notifications are off, so nothing will interrupt you.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Button("Settings") { Notifier.shared.openSystemSettings() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                    Spacer()
+                }
+                .padding(.horizontal, Theme.Space.wide)
+                .padding(.vertical, Theme.Space.snug)
+                .background(Color.orange.opacity(0.08))
                 Divider().opacity(0.5)
             }
             if store.digest != nil || store.problem != nil {
@@ -30,6 +82,14 @@ struct InboxView: View {
                         // A quiet machine and a disconnected one look identical
                         // to a reader. Say which one this is.
                         detail: "Run bridge/install.sh once. Until then nothing reports in.")
+                } else if !store.loadedOnce {
+                    // For the instant before the first read lands, "nothing
+                    // needs you" is a claim nobody has checked.
+                    Placeholder(
+                        symbol: "ellipsis",
+                        tint: .secondary,
+                        title: "Reading the inbox",
+                        detail: "")
                 } else if store.rows.isEmpty {
                     Placeholder(
                         symbol: "checkmark.circle",
@@ -48,15 +108,97 @@ struct InboxView: View {
         }
         .frame(width: Theme.panelWidth)
         .background(VisualEffect())
+        .onAppear {
+            searching = true
+            cursor = 0
+        }
+    }
+
+    /// Always focused, the way the tools this sits beside behave. Typing filters,
+    /// the arrows move, Return acts — a panel that opens on a keystroke and then
+    /// needs a mouse for everything has moved the work rather than removed it.
+    private var search: some View {
+        HStack(spacing: Theme.Space.snug) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.quaternary)
+            TextField("Filter", text: $query)
+                .textFieldStyle(.plain)
+                .font(Theme.Font.body)
+                .focused($searching)
+                .onKeyPress { press in
+                    switch press.key {
+                    case .downArrow: move(1); return .handled
+                    case .upArrow: move(-1); return .handled
+                    case .return:
+                        if press.modifiers.contains(.command) { decideFocused(true) } else { openFocused() }
+                        return .handled
+                    case .delete where press.modifiers.contains(.command):
+                        decideFocused(false)
+                        return .handled
+                    case .init("1"), .init("2"), .init("3"), .init("4"), .init("5"),
+                         .init("6"), .init("7"), .init("8"), .init("9"):
+                        // ⌘1…9 belong to the waiting rows only. Opening is the
+                        // safe landing: a tool call must never run because a
+                        // finger was one key off.
+                        guard press.modifiers.contains(.command),
+                              let index = Int(press.characters), index >= 1
+                        else { return .ignored }
+                        let waiting = rows(in: .waiting)
+                        guard waiting.indices.contains(index - 1),
+                              let at = visible.firstIndex(where: { $0.id == waiting[index - 1].id })
+                        else { return .handled }
+                        cursor = at
+                        openFocused()
+                        return .handled
+                    case .escape:
+                        // First press clears a filter, second closes: leaving the
+                        // panel open with a filter nobody can see is a trap.
+                        if query.isEmpty { closePanel() } else { query = ""; cursor = 0 }
+                        return .handled
+                    default: return .ignored
+                    }
+                }
+            if !query.isEmpty {
+                Button { query = ""; cursor = 0 } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.quaternary)
+                }
+                .buttonStyle(.plain)
+            }
+            Text(shortcutHint)
+                .font(.system(size: 9))
+                .foregroundStyle(.quaternary)
+        }
+        .padding(.horizontal, Theme.Space.wide)
+        .padding(.bottom, Theme.Space.step)
+    }
+
+    /// Only ever names what the focused row can actually do.
+    private var shortcutHint: String {
+        guard let id = focusedID, let row = visible.first(where: { $0.id == id }) else { return "" }
+        if case .pending = row { return "⌘↵ approve · ⌘⌫ deny" }
+        return "↵ open"
     }
 
     private var list: some View {
+        ScrollViewReader { scroller in
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.wide) {
-                section(.waiting, store.waiting)
-                section(.answered, store.answered)
-                section(.running, store.running)
-                section(.finished, store.finished)
+            VStack(alignment: .leading, spacing: Theme.Space.gap) {
+                section(.waiting, rows(in: .waiting))
+                section(.answered, rows(in: .answered))
+                section(.running, rows(in: .running))
+                // Finished rows are history the moment they are read. Five is
+                // what "what just landed" needs; the rest is a log.
+                section(.finished, Array(rows(in: .finished).prefix(5)))
+                if visible.isEmpty, !query.isEmpty {
+                    Text("Nothing matches “\(query)”")
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Theme.Space.room)
+                }
             }
             .padding(.horizontal, Theme.Space.gap)
             .padding(.vertical, Theme.Space.gap)
@@ -69,6 +211,38 @@ struct InboxView: View {
         .scrollIndicators(.never)
         // As short as one row, never taller than the panel is allowed to be.
         .frame(height: min(max(contentHeight, 1), Theme.panelMaxHeight))
+        .onChange(of: cursor) { _, index in
+            guard visible.indices.contains(index) else { return }
+            withAnimation(Theme.hover) { scroller.scrollTo(visible[index].id, anchor: .center) }
+        }
+        }
+    }
+
+    // MARK: - Keyboard
+
+    private func move(_ delta: Int) {
+        guard !visible.isEmpty else { return }
+        cursor = min(max(0, cursor + delta), visible.count - 1)
+    }
+
+    private func openFocused() {
+        guard visible.indices.contains(cursor) else { return }
+        let row = visible[cursor]
+        withAnimation(Theme.expand) {
+            store.open(store.openRowID == row.id ? nil : row)
+        }
+    }
+
+    private func decideFocused(_ allow: Bool) {
+        guard visible.indices.contains(cursor) else { return }
+        let row = visible[cursor]
+        guard case .pending = row else { return }
+        store.decide(row, allow: allow)
+        cursor = min(cursor, max(0, visible.count - 2))
+    }
+
+    private func closePanel() {
+        NSApplication.shared.keyWindow?.close()
     }
 
     @ViewBuilder
@@ -90,9 +264,10 @@ struct InboxView: View {
                 }
                 .padding(.leading, Theme.Space.tight)
 
-                VStack(spacing: Theme.Space.snug) {
+                VStack(spacing: Theme.Space.tight) {
                     ForEach(rows) { row in
-                        RowCard(row: row, store: store)
+                        RowCard(row: row, store: store, focused: focusedID == row.id)
+                            .id(row.id)
                     }
                 }
             }
@@ -295,6 +470,7 @@ private struct DigestBanner: View {
 private struct RowCard: View {
     let row: Row
     @Bindable var store: InboxStore
+    var focused = false
     @State private var hovering = false
 
     private var isOpen: Bool { store.openRowID == row.id }
@@ -349,17 +525,21 @@ private struct RowCard: View {
                   : AnyShapeStyle(Color.primary.opacity(hovering || isOpen ? 0.085 : 0.05)))
             .overlay(
                 // A hairline is what separates a card from a wash. Without it a
-                // column of fills reads as one grey block with text in it.
+                // column of fills reads as one grey block with text in it. The
+                // keyboard's position gets a brighter one, because "where am I"
+                // has to be answerable without moving the mouse.
                 RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                     .strokeBorder(
-                        isBlocked ? row.state.tint.opacity(0.3) : Color.primary.opacity(0.07),
-                        lineWidth: 0.5))
+                        focused ? Color.accentColor.opacity(0.85)
+                            : isBlocked ? row.state.tint.opacity(0.3)
+                            : Color.primary.opacity(0.07),
+                        lineWidth: focused ? 1.5 : 0.5))
     }
 
     private var head: some View {
         HStack(alignment: .top, spacing: Theme.Space.step) {
             glyph
-            VStack(alignment: .leading, spacing: Theme.Space.tight) {
+            VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: Theme.Space.snug) {
                     // Which session this is. The cheapest question on the card,
                     // so it takes the smallest type on it.
@@ -400,7 +580,7 @@ private struct RowCard: View {
             }
         }
         .padding(.horizontal, Theme.Space.gap)
-        .padding(.vertical, Theme.Space.step + 2)
+        .padding(.vertical, Theme.Space.snug + 1)
         .padding(.leading, isBlocked ? Theme.Space.tight : 0)
     }
 
@@ -698,10 +878,12 @@ private struct Placeholder: View {
                 .foregroundStyle(tint.opacity(0.85))
             Text(title)
                 .font(Theme.Font.body.weight(.medium))
-            Text(detail)
-                .font(Theme.Font.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Space.room * 2)

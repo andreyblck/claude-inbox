@@ -18,7 +18,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Requests already announced. Re-announcing one on every directory change
     /// would turn a dozen sessions into a stream of duplicate banners.
     private var announced: Set<String> = []
-    private var authorized = false
+    private(set) var authorized = false
+    /// Nil until the system has answered. Distinguishing "not asked yet" from
+    /// "asked and refused" is the difference between a useful line and a nag.
+    private(set) var settled: Bool?
 
     /// Set by the app so an action can be answered without the panel being open.
     var onDecision: ((String, Bool) -> Void)?
@@ -47,7 +50,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         ])
 
         center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-            Task { @MainActor in self.authorized = granted }
+            Task { @MainActor in
+                self.authorized = granted
+                self.settled = true
+            }
         }
     }
 
@@ -94,6 +100,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         center?.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
+    }
+
+    /// Take the person to the one screen where this can be changed. Telling
+    /// someone a permission is missing without saying where is half a message.
+    func openSystemSettings() {
+        guard let url = URL(
+            string: "x-apple.systempreferences:com.apple.preference.notifications")
+        else { return }
+        NSWorkspace.shared.open(url)
     }
 
     /// A request answered in the panel should not leave a banner behind offering
