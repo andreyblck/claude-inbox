@@ -122,8 +122,12 @@ type LiveSession = {
   /** What a `waiting` session is waiting for, e.g. "input needed". */
   waitingFor?: string;
   pid?: number;
-  /** Process start time. A pid on its own does not identify a process. */
+  /**
+   * Process start time as a bare local-looking string in UTC — not comparable to
+   * anything without knowing that. `startedAt` below is what we actually use.
+   */
   procStart?: string;
+  /** Epoch milliseconds. Zone-free, and within seconds of the process start. */
   startedAt?: number;
   statusUpdatedAt?: number;
 };
@@ -149,9 +153,20 @@ function liveState(status?: string): InboxState {
  *
  * The pid alone answers "does something exist with this number", which after a
  * reboot is a coin flip — and a wrong answer is a ghost row that never leaves.
- * Claude Code records `procStart` for exactly this reason, so use it.
+ *
+ * Compare start *times*, not the strings: the registry writes `procStart` in UTC
+ * with no zone marker ("Sun Sep 20 08:28:05 2026") while `ps -o lstart=` prints
+ * local time ("Sun Sep 20 11:28:05 2026"). Those never match anywhere but UTC, and
+ * a comparison that can only fail reports every live session as dead — an empty
+ * inbox with a dozen sessions running. `startedAt` is epoch milliseconds and has
+ * no such problem, so that is the side we compare against.
+ *
+ * Every uncertainty resolves to alive. Being slow to drop a finished row costs a
+ * line of stale text; being wrong the other way hides the whole product.
  */
-function alive(pid?: number, procStart?: string): boolean {
+const PROC_START_TOLERANCE_MS = 120_000;
+
+function alive(pid?: number, startedAt?: number): boolean {
   if (!pid) return false;
   try {
     process.kill(pid, 0); // signal 0 only tests for existence
@@ -159,13 +174,16 @@ function alive(pid?: number, procStart?: string): boolean {
     // EPERM means it exists and belongs to someone else — alive, just not ours.
     return (error as NodeJS.ErrnoException)?.code === "EPERM";
   }
-  if (!procStart) return true;
+  if (!startedAt) return true;
   try {
-    const started = execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
+    const lstart = execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
       encoding: "utf8",
       timeout: 2000,
     }).trim();
-    return !started || started === procStart.trim();
+    const procStarted = Date.parse(lstart);
+    if (!lstart || Number.isNaN(procStarted)) return true;
+    // A session is registered a moment after its process starts, never before.
+    return Math.abs(procStarted - startedAt) < PROC_START_TOLERANCE_MS;
   } catch {
     return true; // ps is not worth dropping a row over
   }
@@ -212,7 +230,7 @@ export async function readLiveSessions(): Promise<LiveRegistry> {
     for (const row of await readJsonDir<LiveSession>(dir)) {
       if (!row.sessionId) continue;
       if (row.kind && !HUMAN_KINDS.has(row.kind)) continue; // daemons are not sessions
-      if (!alive(row.pid, row.procStart)) continue; // stale file from a closed session
+      if (!alive(row.pid, row.startedAt)) continue; // stale file from a closed session
       out.push({
         session_id: row.sessionId,
         state: liveState(row.status),

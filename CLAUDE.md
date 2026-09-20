@@ -62,13 +62,23 @@ ride in `decision.updatedInput`. Echo `questions` back with an `answers` map;
 - **Test against Claude Code, not against yourself.** `selftest.sh` asserted the
   same wrong shape the hook emitted. `e2e.sh` exists because it is the only test
   that can catch that class of bug — run it after any bridge change.
-- **Raycast needs one manual step.** The menu bar command must be activated (run
-  "Claude Sessions" once and allow background) or the deeplink returns an error
-  toast per turn. The hook only nudges after `inbox/heartbeat-menubar` exists.
+- **Raycast needs two manual steps, and the second is easy to miss.** The menu bar
+  command must be activated (run "Claude Sessions" once and allow background), *and*
+  Raycast must be allowed in macOS's own menu bar settings — System Settings →
+  Control Center. With Raycast switched off there, the command runs on its interval,
+  logs nothing, reports "Last refresh" happily, and puts no icon in the bar. Nothing
+  in Raycast or in the code says so. The tell is in `defaults read com.raycast.macos`:
+  a working item has `NSStatusItem Visible …` and `NSStatusItem Preferred Position …`
+  keys; ours had only `VisibleCC`, because macOS never gave it a slot.
+  The hook only nudges after `inbox/heartbeat-menubar` exists.
 - **The extension only runs while `npm run dev` does.** It is a development
   extension; stop the watcher and the menu bar item goes away.
 - **Two sources, neither authoritative.** The live registry (under the *config*
   directory, hence `inbox/config-dirs`) knows liveness; the hooks know intent. The
   merge takes the freshest observation — do not reintroduce a fixed winner.
+- **A liveness check resolves every doubt to "alive".** `procStart` in the registry
+  is UTC with no zone marker while `ps -o lstart=` prints local time, so comparing
+  the strings can only ever fail — which reported every session dead and emptied
+  both views. Compare `startedAt` (epoch ms) instead. `test/live.test.ts` pins it.
 - `.camp/track-claude-inbox-basics.md` has the full root-cause trace and the
   theories that were ruled out.
