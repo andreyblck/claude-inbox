@@ -64,7 +64,7 @@ export const LIMITS = {
    * subject — "Optics для pricing review email" — is the whole value of the row
    * and truncating it to a verb phrase throws that value away.
    */
-  subject: 38,
+  subject: 48,
   /** Characters of a command echoed into a single-line row. */
   commandInline: 24,
 } as const;
@@ -118,6 +118,8 @@ export type SessionRecord = {
   title?: string | null;
   /** The last few things the session did, newest first. */
   activity?: string[];
+  /** The model's own sentence about what it is doing, from the transcript. */
+  saying?: string;
   permission_mode?: string;
   transcript_path?: string;
   last_message?: string | null;
@@ -254,10 +256,13 @@ export function subjectOf(session: SessionRecord, max: number = LIMITS.subject):
     return body || undefined;
   };
 
+  // The model narrates itself before it acts, in the person's own language, and
+  // that sentence beats anything derived — a title summarising the first prompt
+  // ("Давай давай давай"), a tool name, or the state the icon already shows.
   const finished = STATES[session.state].group === "finished";
   const candidates = finished
-    ? [session.title, session.last_message, session.last_prompt]
-    : [session.title, session.last_prompt, session.activity?.[0], session.last_message];
+    ? [session.last_message, session.saying, session.title, session.last_prompt]
+    : [session.saying, session.last_prompt, session.title, session.activity?.[0]];
 
   for (const candidate of candidates) {
     const text = clean(candidate);

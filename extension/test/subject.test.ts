@@ -34,34 +34,47 @@ describe("the step a session declared", () => {
 });
 
 describe("what a session is about", () => {
-  it("prefers the title Claude Code generated for it", () => {
+  it("prefers the sentence the model wrote about what it is doing", () => {
+    // It is already there, already in the person's language, and it describes
+    // this moment rather than summarising the session's opening line.
     const row = session({
       state: "working",
-      title: "Optics для pricing review email",
+      saying: "Закрываю тестами.",
+      title: "Давай давай давай",
       last_prompt: "давай доделывай",
       activity: ["running npm test"],
     });
-    assert.equal(subjectOf(row), "Optics для pricing review email");
+    assert.equal(subjectOf(row), "Закрываю тестами.");
   });
 
   it("falls back to what was asked, without repeating the slash command", () => {
-    // The command is already shown as the phase; repeating it costs the
+    // The command is already shown as the step; repeating it costs the
     // characters that carry the actual request.
     const row = session({ state: "working", last_prompt: "/morgan:pull дособери фичу" });
     assert.equal(subjectOf(row), "дособери фичу");
   });
 
-  it("falls back to what it is doing right now", () => {
+  it("prefers the request over the generated title", () => {
+    // The title summarises how the session opened; the prompt is what it is on
+    // now. When they disagree, the newer one is the truer one.
+    const row = session({ state: "working", title: "Иконка в меню бар", last_prompt: "теперь почини уведомления" });
+    assert.equal(subjectOf(row), "теперь почини уведомления");
+  });
+
+  it("falls back to what it is touching, when nothing was said or asked", () => {
+    // A session deep in a run of tool calls has no sentence in its tail. The
+    // tool is thin, but it beats repeating the icon.
     const row = session({ state: "working", activity: ["editing state.ts"] });
     assert.equal(subjectOf(row), "editing state.ts");
   });
 
   it("a finished session says what landed, not what it was doing", () => {
     // Nothing there is in flight; the only question anyone asks of that section
-    // is "what came out of it".
+    // is what came out of it.
     const row = session({
       state: "done",
       last_message: "Shipped. Tests pass, PR opened.",
+      saying: "Запускаю сборку.",
       activity: ["running npm test"],
       last_prompt: "доделай",
     });
@@ -73,9 +86,9 @@ describe("what a session is about", () => {
   });
 
   it("keeps it to one line and inside the budget", () => {
-    const row = session({ state: "working", title: "a".repeat(200) });
-    assert.ok(subjectOf(row).length <= 38, subjectOf(row));
-    const wrapped = session({ state: "working", last_prompt: "first line\nsecond    line" });
+    const row = session({ state: "working", saying: "a".repeat(200) });
+    assert.ok(subjectOf(row).length <= 48, `${subjectOf(row).length} chars`);
+    const wrapped = session({ state: "working", saying: "first line\nsecond    line" });
     assert.equal(subjectOf(wrapped), "first line second line");
   });
 });
@@ -92,14 +105,36 @@ describe("reading a transcript for the title and the current move", () => {
     message: { content: [{ type: "tool_use", name, input }] },
   });
 
-  it("finds the newest title and the newest tool call in one pass", async () => {
+  const says = (text: string) => ({ type: "assistant", message: { content: [{ type: "text", text }] } });
+
+  it("finds the newest of everything in one pass", async () => {
     const path = await transcript([
       { type: "ai-title", aiTitle: "Старый заголовок" },
       toolUse("Read", { file_path: "/Users/me/work/api/state.ts" }),
       { type: "ai-title", aiTitle: "Иконка в меню бар" },
+      { type: "last-prompt", lastPrompt: "почини иконку" },
+      says("Закрываю тестами."),
       toolUse("Bash", { command: "npm test" }),
     ]);
-    assert.deepEqual(await readSessionSummary(path), { title: "Иконка в меню бар", doing: "running npm test" });
+    assert.deepEqual(await readSessionSummary(path), {
+      title: "Иконка в меню бар",
+      prompt: "почини иконку",
+      saying: "Закрываю тестами.",
+      doing: "running npm test",
+    });
+  });
+
+  it("does not mistake the user's own words for the model's", async () => {
+    const path = await transcript([
+      { type: "user", message: { content: [{ type: "text", text: "сделай это" }] } },
+      toolUse("Bash", { command: "ls" }),
+    ]);
+    assert.equal((await readSessionSummary(path)).saying, undefined);
+  });
+
+  it("takes the newest sentence when a turn has several", async () => {
+    const path = await transcript([says("Сначала это."), toolUse("Bash", { command: "ls" }), says("Теперь то.")]);
+    assert.equal((await readSessionSummary(path)).saying, "Теперь то.");
   });
 
   it("drops the cd that every command starts with", async () => {

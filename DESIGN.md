@@ -100,11 +100,21 @@ Rules that keep it from turning into mush:
 
    | Source | Example | Where it comes from |
    |---|---|---|
-   | Claude Code's own title | `Optics для pricing review email` | `ai-title` in the transcript, rewritten each turn |
-   | what was last asked | `дособери фичу` | `prompt` on `UserPromptSubmit`, free |
-   | what it is doing now | `running npm test` | newest `tool_use` in the transcript |
+   | the model's own sentence | `Закрываю тестами.` | newest assistant text in the transcript |
+   | what was last asked | `дособери фичу` | `prompt` on `UserPromptSubmit`, or `last-prompt` in the transcript |
+   | Claude Code's title | `Optics для pricing review email` | `ai-title`, rewritten each turn |
+   | what it is touching | `running npm test` | newest `tool_use` in the transcript |
    | what landed | `Shipped. Tests pass, PR opened.` | `last_assistant_message` on `Stop` |
    | the state | `working` | last resort, and an admission we know nothing |
+
+   The first one is the one that matters, and it needed no inventing: the model
+   writes a sentence about what it is about to do before it does it. It is
+   already there, already in the person's language, and costs neither a token nor
+   a millisecond. Generating a summary would be slower, dearer and no better.
+
+   The title is deliberately *below* the prompt: it summarises how the session
+   opened, so a session that began "Давай давай давай" is titled that forever.
+   When the two disagree, the newer one is the truer one.
 
    A finished row reverses the middle two: nothing there is in flight, and the
    only question anyone asks of that section is what came out of it.

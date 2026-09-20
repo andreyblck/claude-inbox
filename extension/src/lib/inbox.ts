@@ -313,10 +313,28 @@ async function readTail(path: string, bytes: number): Promise<string | undefined
  * This is the difference between a row that reads "skyaccess-48 · working" and
  * one that reads "skyaccess-48 · Optics для pricing review email".
  */
-const SUMMARY_TAIL = 64 * 1024;
+// A single Read result can fill 64 KB on its own, and then the tail holds no
+// sentence at all — which is how a row ends up reading `running sed -n 70,78p`
+// instead of what the session is actually up to. The 20s cache pays for this.
+const SUMMARY_TAIL = 256 * 1024;
 const SUMMARY_TTL_MS = 20_000;
 
-export type SessionSummary = { title?: string; doing?: string };
+export type SessionSummary = {
+  title?: string;
+  doing?: string;
+  /**
+   * The model's own sentence about what it is doing, written just before it acts.
+   * Nothing we could generate beats it: it is already there, already in the
+   * person's language, and costs neither a token nor a millisecond.
+   */
+  saying?: string;
+  /**
+   * What was last asked. The bridge captures this on UserPromptSubmit, but only
+   * for sessions that started after it was installed — and the transcript has it
+   * for every session, in the same tail we are already reading.
+   */
+  prompt?: string;
+};
 
 const summaryCache = new Map<string, { at: number; summary: SessionSummary }>();
 
@@ -388,26 +406,31 @@ export async function readSessionSummary(transcriptPath?: string): Promise<Sessi
   const buf = await readTail(transcriptPath, SUMMARY_TAIL);
   if (buf) {
     const lines = buf.split("\n");
-    for (let i = lines.length - 1; i >= 0 && !(summary.title && summary.doing); i--) {
+    for (let i = lines.length - 1; i >= 0 && !(summary.title && summary.doing && summary.saying && summary.prompt); i--) {
       const line = lines[i].trim();
       if (!line.startsWith("{")) continue;
       try {
         const row = JSON.parse(line) as {
           type?: string;
           aiTitle?: string;
-          message?: { content?: unknown };
+          lastPrompt?: string;
+          message?: { content?: { length: number; [index: number]: unknown } };
         };
         if (!summary.title && row.type === "ai-title" && row.aiTitle) summary.title = row.aiTitle;
-        if (!summary.doing && Array.isArray(row.message?.content)) {
+        if (!summary.prompt && row.type === "last-prompt" && row.lastPrompt) summary.prompt = row.lastPrompt;
+        if (Array.isArray(row.message?.content)) {
           for (let j = row.message.content.length - 1; j >= 0; j--) {
             const block = row.message.content[j] as {
               type?: string;
               name?: string;
+              text?: string;
               input?: Record<string, unknown>;
             };
-            if (block.type === "tool_use" && block.name) {
+            if (!summary.doing && block.type === "tool_use" && block.name) {
               summary.doing = describeTool(block.name, block.input);
-              break;
+            }
+            if (!summary.saying && row.type === "assistant" && block.type === "text" && block.text?.trim()) {
+              summary.saying = oneLine(block.text).trim() || undefined;
             }
           }
         }
@@ -468,9 +491,13 @@ export async function enrichRows(rows: Row[]): Promise<Row[]> {
       if (row.kind !== "session") return row;
       const summary = await readSessionSummary(row.session.transcript_path);
       const title = row.session.title ?? summary.title;
-      const phase = row.session.phase ?? phaseOf(row.session.last_prompt);
       const activity = summary.doing ? [summary.doing] : row.session.activity;
-      return { ...row, session: { ...row.session, title, phase, activity } };
+      const last_prompt = row.session.last_prompt ?? summary.prompt;
+      const phaseFromPrompt = row.session.phase ?? phaseOf(last_prompt);
+      return {
+        ...row,
+        session: { ...row.session, title, phase: phaseFromPrompt, activity, last_prompt, saying: summary.saying },
+      };
     }),
   );
 }
