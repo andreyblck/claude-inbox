@@ -361,7 +361,7 @@ private struct RowCard: View {
     @ViewBuilder
     private var composer: some View {
         if case .session(let s) = row, let pid = s.pid, Peer.canReach(pid: pid) {
-            Composer(pid: pid, onSent: { store.reload() })
+            Composer(pid: pid, permissionMode: s.permissionMode, onSent: { store.reload() })
         }
     }
 
@@ -419,11 +419,13 @@ private struct RowCard: View {
 /// placeholder says so rather than letting anyone find out later.
 private struct Composer: View {
     let pid: Int
+    let permissionMode: String?
     let onSent: () -> Void
 
     @State private var text = ""
     @State private var problem: String?
     @State private var sent = false
+    @State private var held = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -458,11 +460,40 @@ private struct Composer: View {
                 Text(problem)
                     .font(.system(size: 9.5))
                     .foregroundStyle(.orange)
+            } else if held {
+                // Saying this after the fact would be worse than not saying it:
+                // the whole point is not having to go to the terminal, and a held
+                // message is a trip to the terminal with extra steps.
+                HStack(alignment: .top, spacing: Theme.Space.snug) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("This session bypasses prompts, so Claude Code parks notes from outside it. You would have to release this one in the terminal.")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Deliver them instead") { accept() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(Color.accentColor)
+                            .help("Sets crossSessionInbound to \"accept\". Anything on this machine running as you could then steer a bypassing session. Your settings.json is backed up first.")
+                    }
+                }
             } else {
                 Text("Arrives as a message from a peer session, not as you.")
                     .font(.system(size: 9))
                     .foregroundStyle(.quaternary)
             }
+        }
+        .onAppear { held = Settings.willHold(permissionMode: permissionMode) }
+    }
+
+    private func accept() {
+        if Settings.setInbound(.accept) {
+            held = false
+        } else {
+            problem = "Could not write settings.json — it may be unreadable."
         }
     }
 
