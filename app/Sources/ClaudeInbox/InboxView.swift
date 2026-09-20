@@ -69,8 +69,10 @@ struct InboxView: View {
                 HStack(spacing: Theme.Space.snug) {
                     Text(group.title.uppercased())
                         .font(Theme.Font.section)
-                        .tracking(0.6)
-                        .foregroundStyle(.tertiary)
+                        .tracking(0.9)
+                        .foregroundStyle(group == .waiting
+                                         ? AnyShapeStyle(Color.yellow.opacity(0.9))
+                                         : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
                     Text("\(rows.count)")
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(.quaternary)
@@ -200,41 +202,53 @@ private struct RowCard: View {
     private var background: some View {
         RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
             .fill(isBlocked
-                  ? AnyShapeStyle(row.state.tint.opacity(hovering ? 0.16 : 0.11))
-                  : AnyShapeStyle(Color.primary.opacity(hovering || isOpen ? 0.07 : 0.04)))
+                  ? AnyShapeStyle(row.state.tint.opacity(hovering ? 0.18 : 0.13))
+                  : AnyShapeStyle(Color.primary.opacity(hovering || isOpen ? 0.085 : 0.05)))
+            .overlay(
+                // A hairline is what separates a card from a wash. Without it a
+                // column of fills reads as one grey block with text in it.
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .strokeBorder(
+                        isBlocked ? row.state.tint.opacity(0.3) : Color.primary.opacity(0.07),
+                        lineWidth: 0.5))
     }
 
     private var head: some View {
         HStack(alignment: .top, spacing: Theme.Space.step) {
             glyph
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: Theme.Space.tight) {
                 HStack(spacing: Theme.Space.snug) {
-                    // A column of short names is what the eye scans; the sentence
-                    // beside it is read only on the row it stopped at.
-                    Text(project)
-                        .font(Theme.Font.row)
+                    // Which session this is. The cheapest question on the card,
+                    // so it takes the smallest type on it.
+                    Text(project.uppercased())
+                        .font(Theme.Font.eyebrow)
+                        .tracking(0.4)
+                        .foregroundStyle(.tertiary)
                         .lineLimit(1)
                     if case .session(let s) = row, let phase = s.phase {
                         Text(phase)
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.3)
+                            .foregroundStyle(row.state.tint.opacity(0.9))
                             .padding(.horizontal, 5)
-                            .padding(.vertical, 1.5)
+                            .padding(.vertical, 1)
                             .background(
                                 RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
-                                    .fill(.primary.opacity(0.08)))
+                                    .fill(row.state.tint.opacity(0.14)))
                     }
                     Spacer(minLength: Theme.Space.tight)
                     Text(Format.age(row.ts))
                         .font(Theme.Font.micro)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.quaternary)
                         .monospacedDigit()
                 }
+                // The headline: what is going on. The first version gave this
+                // less weight than the project name, so every card led with the
+                // least interesting thing on it.
                 Text(subject)
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(isBlocked ? AnyShapeStyle(Color.primary)
-                                               : AnyShapeStyle(HierarchicalShapeStyle.secondary))
-                    .lineLimit(isOpen ? 4 : 2)
+                    .font(Theme.Font.subject)
+                    .foregroundStyle(.primary)
+                    .lineLimit(isOpen ? 5 : 2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -276,19 +290,7 @@ private struct RowCard: View {
         VStack(alignment: .leading, spacing: Theme.Space.step) {
             Divider().opacity(0.4)
 
-            if case .pending(let item) = row,
-               let command = item.toolInput?["command"]?.stringValue
-                   ?? item.toolInput?["file_path"]?.stringValue
-            {
-                Text(command)
-                    .font(Theme.Font.mono)
-                    .textSelection(.enabled)
-                    .padding(Theme.Space.step)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                            .fill(.black.opacity(0.2)))
-            }
+            if case .pending(let item) = row { ask(for: item) }
 
             if case .session(let s) = row {
                 if let asked = Format.userPrompt(s.lastPrompt) {
@@ -337,7 +339,7 @@ private struct RowCard: View {
     private var footer: some View {
         HStack(spacing: Theme.Space.step) {
             if let cwd = row.cwd {
-                Text(cwd)
+                Text(Format.shortPath(cwd))
                     .font(.system(size: 9.5))
                     .foregroundStyle(.quaternary)
                     .lineLimit(1)
@@ -356,6 +358,48 @@ private struct RowCard: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    /// What is actually being decided.
+    ///
+    /// The first version printed whatever string it could find, which for a file
+    /// edit meant two lines of `/private/var/folders/sz/…` — a path nobody reads
+    /// and nobody decides on. A command is the decision; a file is its name, with
+    /// the directory kept small beside it.
+    @ViewBuilder
+    private func ask(for item: PendingItem) -> some View {
+        if let command = item.toolInput?["command"]?.stringValue {
+            Text(command)
+                .font(Theme.Font.mono)
+                .textSelection(.enabled)
+                .lineLimit(6)
+                .padding(Theme.Space.step)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                        .fill(.black.opacity(0.22)))
+        } else if let path = item.toolInput?["file_path"]?.stringValue {
+            HStack(spacing: Theme.Space.snug) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                Text(path.split(separator: "/").last.map(String.init) ?? path)
+                    .font(Theme.Font.mono)
+                    .textSelection(.enabled)
+                Text(Format.shortPath((path as NSString).deletingLastPathComponent))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.quaternary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Space.step)
+            .padding(.vertical, Theme.Space.snug)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                    .fill(.black.opacity(0.22)))
         }
     }
 

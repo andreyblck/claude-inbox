@@ -143,6 +143,22 @@ if CommandLine.arguments.contains("--dump") {
     exit(0)
 }
 
+// `--send <pid> <text>` exercises the peer channel without the panel, so the
+// transport can be tested apart from the UI that drives it.
+if let i = CommandLine.arguments.firstIndex(of: "--send"),
+   CommandLine.arguments.count > i + 2,
+   let pid = Int(CommandLine.arguments[i + 1])
+{
+    do {
+        try Peer.send(CommandLine.arguments[i + 2], toPID: pid)
+        print("delivered to pid \(pid)")
+        exit(0)
+    } catch {
+        print("failed: \(error.localizedDescription)")
+        exit(1)
+    }
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

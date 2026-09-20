@@ -96,6 +96,22 @@ enum Format {
         return truncate(base ?? fallback ?? "unknown", Limits.project)
     }
 
+    /// A path a person can read.
+    ///
+    /// `/private/var/folders/sz/n9zh8s2x…/T/tmp.3nRfVq8Ruf` is four lines of noise
+    /// and one useful word. Home becomes `~`, the system temp becomes `tmp`, and
+    /// what is left is the part someone would have said out loud.
+    static func shortPath(_ path: String) -> String {
+        var text = path
+        if let range = text.range(of: "/var/folders/[^/]+/[^/]+/T/", options: .regularExpression) {
+            text = "tmp/" + text[range.upperBound...]
+        }
+        text = text.replacingOccurrences(of: "^/private", with: "", options: .regularExpression)
+        let home = NSHomeDirectory()
+        if text.hasPrefix(home) { text = "~" + text.dropFirst(home.count) }
+        return text
+    }
+
     /// Compact and relative: "2m", "1h", "just now". A row has no room for a date.
     static func age(_ ts: Double, now: Date = Date()) -> String {
         let secs = max(0, Int(now.timeIntervalSince1970 - ts))

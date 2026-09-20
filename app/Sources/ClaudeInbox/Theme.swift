@@ -26,12 +26,18 @@ enum Theme {
     /// The scale is narrow on purpose. Hierarchy comes from weight and colour,
     /// because five type sizes in a 460pt panel reads as five different apps.
     enum Font {
-        static let title = SwiftUI.Font.system(size: 13, weight: .semibold)
-        static let row = SwiftUI.Font.system(size: 12.5, weight: .semibold)
+        static let title = SwiftUI.Font.system(size: 13, weight: .bold)
+        /// The project. Small and quiet on purpose — it says *which*, and which is
+        /// the cheapest question in the panel.
+        static let eyebrow = SwiftUI.Font.system(size: 10.5, weight: .semibold)
+        /// What the session is about. This is the content, so it is the headline:
+        /// the first version had it a size smaller than the project name, which
+        /// made every card lead with the least interesting thing on it.
+        static let subject = SwiftUI.Font.system(size: 12.5, weight: .medium)
         static let body = SwiftUI.Font.system(size: 12, weight: .regular)
         static let caption = SwiftUI.Font.system(size: 11, weight: .regular)
         static let micro = SwiftUI.Font.system(size: 10, weight: .medium)
-        static let section = SwiftUI.Font.system(size: 10, weight: .semibold)
+        static let section = SwiftUI.Font.system(size: 9.5, weight: .bold)
         static let mono = SwiftUI.Font.system(size: 11, design: .monospaced)
         static let monoSmall = SwiftUI.Font.system(size: 10, design: .monospaced)
     }
