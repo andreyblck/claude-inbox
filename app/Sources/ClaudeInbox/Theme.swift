@@ -73,6 +73,34 @@ struct VisualEffect: NSViewRepresentable {
     }
 }
 
+/// Reports how tall a view actually is.
+///
+/// A `ScrollView` has no height of its own, so a panel built from header +
+/// scroller + footer has no definite height either, and every layout below it is
+/// a guess. Measuring the content and clamping it is what makes the panel as
+/// short as one row and no taller than the screen allows.
+struct HeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+extension View {
+    func measureHeight(into binding: Binding<CGFloat>) -> some View {
+        background(
+            GeometryReader { proxy in
+                Color.clear.preference(key: HeightKey.self, value: proxy.size.height)
+            }
+        )
+        .onPreferenceChange(HeightKey.self) { height in
+            if height > 0, abs(binding.wrappedValue - height) > 0.5 {
+                binding.wrappedValue = height
+            }
+        }
+    }
+}
+
 /// A ring, for a number that is a fraction of something.
 ///
 /// Rings over bars because a bar in a row competes with the text beside it for

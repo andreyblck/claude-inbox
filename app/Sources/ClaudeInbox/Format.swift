@@ -147,12 +147,12 @@ enum Format {
     }
 
     /// What a blocked session wants, as a lowercase verb phrase.
-    static func askPhrase(_ item: PendingItem) -> String {
+    static func askPhrase(_ item: PendingItem, max: Int = Limits.ask) -> String {
         let input = item.toolInput
         switch item.kind {
         case "question":
             let questions = input?["questions"]
-            if questions?.count ?? 0 > 0 { return truncate("pick one of \(questions!.count)", Limits.ask) }
+            if questions?.count ?? 0 > 0 { return truncate("pick one of \(questions!.count)", max) }
             return "answer a question"
         case "plan":
             return "approve plan"
@@ -160,17 +160,17 @@ enum Format {
             let tool = item.toolName ?? "a tool"
             if tool == "Bash" {
                 guard let cmd = input?["command"]?.stringValue else { return "run a command" }
-                return truncate("run " + oneLine(cmd), Limits.ask)
+                return truncate("run " + oneLine(cmd), max)
             }
             if ["Write", "Edit", "NotebookEdit"].contains(tool) {
                 let file = input?["file_path"]?.stringValue?.split(separator: "/").last.map(String.init)
-                return truncate(file.map { "edit \($0)" } ?? "edit a file", Limits.ask)
+                return truncate(file.map { "edit \($0)" } ?? "edit a file", max)
             }
             if tool.hasPrefix("mcp__") {
                 let server = tool.split(separator: "_", omittingEmptySubsequences: true).dropFirst().first
-                return truncate("use \(server.map(String.init) ?? "an integration")", Limits.ask)
+                return truncate("use \(server.map(String.init) ?? "an integration")", max)
             }
-            return truncate("use \(tool)", Limits.ask)
+            return truncate("use \(tool)", max)
         }
     }
 

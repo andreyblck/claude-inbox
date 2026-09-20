@@ -598,6 +598,7 @@ export function mergeRows(
         phase: hooked.phase ?? alive.phase,
         last_message: hooked.last_message ?? alive.last_message,
         last_prompt: hooked.last_prompt ?? alive.last_prompt,
+        waiting_for: hooked.waiting_for ?? alive.waiting_for,
         transcript_path: hooked.transcript_path ?? alive.transcript_path,
         permission_mode: hooked.permission_mode ?? alive.permission_mode,
         state: useHooked ? hooked.state : alive.state,

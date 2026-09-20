@@ -4,6 +4,7 @@ import SwiftUI
 /// card you open and read the whole answer in, with the decision on that card.
 struct InboxView: View {
     @Bindable var store: InboxStore
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,13 +37,12 @@ struct InboxView: View {
             }
         }
         .frame(width: Theme.panelWidth)
-        .frame(maxHeight: Theme.panelMaxHeight)
         .background(VisualEffect())
     }
 
     private var list: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: Theme.Space.wide) {
+            VStack(alignment: .leading, spacing: Theme.Space.wide) {
                 section(.waiting, store.waiting)
                 section(.answered, store.answered)
                 section(.running, store.running)
@@ -50,8 +50,15 @@ struct InboxView: View {
             }
             .padding(.horizontal, Theme.Space.gap)
             .padding(.vertical, Theme.Space.gap)
+            // Fill the panel, do not restate its width: this stack carries the
+            // horizontal padding, so naming the same number here makes it wider
+            // than its own parent.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .measureHeight(into: $contentHeight)
         }
         .scrollIndicators(.never)
+        // As short as one row, never taller than the panel is allowed to be.
+        .frame(height: min(max(contentHeight, 1), Theme.panelMaxHeight))
     }
 
     @ViewBuilder

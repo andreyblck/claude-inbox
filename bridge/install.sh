@@ -98,7 +98,9 @@ if mode != "uninstall":
     })
     # UserPromptSubmit is what puts a session back to "working" after a Stop.
     # Without it the registry reports idle for the rest of the process's life.
-    for event in ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"):
+    # Notification is what fires when a session wants the human at all — which,
+    # in acceptEdits or bypassPermissions, is most of the times it ever does.
+    for event in ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd", "Notification"):
         hooks.setdefault(event, []).append({
             "hooks": [{"type": "command", "command": cmd("hook-session.sh"), "timeout": 5}]
         })

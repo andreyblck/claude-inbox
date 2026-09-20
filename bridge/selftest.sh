@@ -99,6 +99,18 @@ printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-6","cwd":"/x"
 printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-6","cwd":"/x","prompt":"<task-notification><task-id>a</task-id></task-notification>"}' | ./hook-session.sh
 check "real prompt kept" "$(/usr/bin/jq -r .last_prompt "$CLAUDE_INBOX_DIR/sessions/s-6.json")" "/morgan:pull дособери"
 
+echo "4d. Notification is the event that fires for the way people actually work"
+# A session in acceptEdits or bypassPermissions almost never raises a permission
+# request. Without this the bridge is deaf through most of a working day.
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-7","cwd":"/x","prompt":"поехали"}' | ./hook-session.sh
+printf '%s' '{"hook_event_name":"Notification","session_id":"s-7","cwd":"/x","message":"Claude is waiting for your input"}' | ./hook-session.sh
+check "state"        "$(/usr/bin/jq -r .state       "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "blocked.dialog"
+check "what it says" "$(/usr/bin/jq -r .waiting_for "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "Claude is waiting for your input"
+# Answering in the terminal has to clear it, or the row is stuck forever.
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-7","cwd":"/x","prompt":"ответил"}' | ./hook-session.sh
+check "clears itself" "$(/usr/bin/jq -r .state       "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "working"
+check "and forgets"   "$(/usr/bin/jq -r .waiting_for "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "null"
+
 echo "5. the pending record keeps what the UI and the grant need"
 ( for _ in $(seq 1 100); do
     f=$(ls "$CLAUDE_INBOX_DIR/pending"/*.json 2>/dev/null | head -1) || true

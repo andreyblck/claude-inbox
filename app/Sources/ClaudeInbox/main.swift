@@ -23,13 +23,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.animates = false
         popover.delegate = self
         let host = NSHostingController(rootView: InboxView(store: store))
+        // Without this the popover does not ask SwiftUI how big the panel is: it
+        // picks a size, the content is laid out against a different one, and the
+        // result is a panel whose left edge is off the side of its own window.
+        host.sizingOptions = [.preferredContentSize]
         // Let the panel's own material show. A hosting view paints an opaque
         // backing by default, which sits on top of the popover's vibrancy and
         // turns a native panel into a rectangle glued over the desktop.
         host.view.wantsLayer = true
         host.view.layer?.backgroundColor = .clear
+        popover.contentSize = NSSize(width: Theme.panelWidth, height: 320)
         popover.contentViewController = host
 
+        Notifier.shared.start()
+        Notifier.shared.onDecision = { [weak self] req, allow in
+            self?.store.decide(req: req, allow: allow)
+        }
         store.start()
         render()
         // The bar redraws when the inbox changes, which is what the watcher is

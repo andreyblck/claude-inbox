@@ -66,6 +66,13 @@ final class InboxStore {
                 self.usage = usage
                 self.bridgeInstalled = installed
                 self.loadedOnce = true
+                // Announcing is a side effect of knowing, so it belongs with the
+                // read rather than on a schedule of its own.
+                Notifier.shared.sync(
+                    pending: pending,
+                    waiting: rows.compactMap {
+                        if case .session(let s) = $0, s.state == .blockedDialog { return s } else { return nil }
+                    })
             }
         }
     }
@@ -92,6 +99,21 @@ final class InboxStore {
         }
     }
 
+    /// Answer by request id — what a notification action has to work with.
+    func decide(req: String, allow: Bool) {
+        guard let row = rows.first(where: { if case .pending(let p) = $0 { return p.req == req } else { return false } })
+        else {
+            // The panel may not have loaded this row yet; the verdict still goes.
+            Inbox.writeVerdict(
+                req: req, decision: allow ? "allow" : "deny",
+                reason: allow ? "Approved in Claude Inbox" : "Denied in Claude Inbox")
+            Notifier.shared.withdraw(req)
+            reload()
+            return
+        }
+        decide(row, allow: allow)
+    }
+
     func decide(_ row: Row, allow: Bool) {
         guard case .pending(let item) = row else { return }
         let decision = allow ? "allow" : "deny"
@@ -99,6 +121,9 @@ final class InboxStore {
             req: item.req,
             decision: decision,
             reason: allow ? "Approved in Claude Inbox" : "Denied in Claude Inbox")
+        // A request answered here should not leave a banner behind offering to
+        // answer it again.
+        Notifier.shared.withdraw(item.req)
         // Optimistic: the verdict is a local file write, and a spinner on one is
         // a lie about how long it takes.
         rows.removeAll { $0.id == row.id }

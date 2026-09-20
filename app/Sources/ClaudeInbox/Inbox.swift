@@ -196,6 +196,7 @@ enum Inbox {
                 alive.lastPrompt = record.lastPrompt ?? alive.lastPrompt
                 alive.transcriptPath = record.transcriptPath ?? alive.transcriptPath
                 alive.permissionMode = record.permissionMode ?? alive.permissionMode
+                alive.waitingFor = record.waitingFor ?? alive.waitingFor
                 if useHooked {
                     alive.state = record.state
                     alive.ts = record.ts

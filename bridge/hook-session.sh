@@ -22,6 +22,11 @@ case "$event" in
   SessionStart|UserPromptSubmit) state="working" ;;
   Stop)                          state="idle" ;;
   SessionEnd)                    state="done" ;;
+  # The event that actually fires for the way people work. A session in
+  # acceptEdits or bypassPermissions almost never raises a PermissionRequest, so
+  # a bridge listening only for those is deaf to most of a day: Notification is
+  # Claude Code saying "this one wants you" whatever the permission mode is.
+  Notification)                  state="blocked.dialog" ;;
   *)                             exit 0 ;;
 esac
 
@@ -42,6 +47,8 @@ printf '%s' "$payload" | "$JQ" --arg state "$state" --arg event "$event" --argjs
   permission_mode: .permission_mode,
   transcript_path: .transcript_path,
   end_reason: (.reason // null),
+  # What it wants, in Claude Code own words: "Claude is waiting for your input".
+  waiting_for: ((.message | select(type == "string")) // (if $state == "blocked.dialog" then $prev.waiting_for else null end)),
   # What the person actually asked for. It arrives free on UserPromptSubmit, and
   # it is the difference between a row that says "working" and one that says what
   # the session is working on.

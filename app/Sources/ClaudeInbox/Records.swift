@@ -56,7 +56,9 @@ struct SessionRecord: Codable, Sendable, Identifiable {
         // `phase` is written by the bridge when a session declares a step, so it
         // has to be decoded — leaving it out silently dropped every declared step
         // and put "working" back in rows that had something better to say.
-        case endReason, lastPrompt, lastMessage, demo, phase
+        // `waitingFor` now comes from the hooks too, not only the live registry:
+        // Notification carries what the session wants in Claude Code own words.
+        case endReason, lastPrompt, lastMessage, demo, phase, waitingFor
     }
 }
 
