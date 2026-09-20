@@ -159,6 +159,26 @@ if let i = CommandLine.arguments.firstIndex(of: "--send"),
     }
 }
 
+// `--md` shows what the parser found in a real answer, so the block shapes can
+// be checked without opening a panel.
+if let i = CommandLine.arguments.firstIndex(of: "--md"), CommandLine.arguments.count > i + 1 {
+    let text = (try? String(contentsOfFile: CommandLine.arguments[i + 1], encoding: .utf8)) ?? ""
+    for block in Markdown.parse(text) {
+        switch block {
+        case .heading(let level, let text): print("heading \(level)  \(text.prefix(60))")
+        case .paragraph(let text): print("paragraph    \(text.prefix(60))…")
+        case .code(let lang, let text):
+            print("code \(lang ?? "—")     \(text.split(separator: "\n").count) lines")
+        case .list(let items, let ordered): print("list \(ordered ? "1." : "• ")     \(items.count) items")
+        case .quote(let text): print("quote        \(text.prefix(50))")
+        case .table(let header, let rows):
+            print("TABLE        \(header.count) cols × \(rows.count) rows — \(header.joined(separator: " | "))")
+        case .rule: print("rule")
+        }
+    }
+    exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

@@ -306,15 +306,10 @@ private struct RowCard: View {
                 // back to the terminal.
                 if let answer = store.narration ?? s.lastMessage, !answer.isEmpty {
                     ScrollView {
-                        Text(markdown(answer))
-                            .font(Theme.Font.body)
-                            .textSelection(.enabled)
-                            .lineSpacing(2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
+                        MarkdownView(text: answer)
                     }
                     .scrollIndicators(.never)
-                    .frame(maxHeight: 280)
+                    .frame(maxHeight: 300)
                 }
                 if !store.activity.isEmpty {
                     VStack(alignment: .leading, spacing: 2) {
@@ -328,6 +323,7 @@ private struct RowCard: View {
                 }
             }
 
+            composer
             footer
         }
         .padding(.horizontal, Theme.Space.gap)
@@ -358,6 +354,14 @@ private struct RowCard: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    /// Writing back into a session that is still running.
+    @ViewBuilder
+    private var composer: some View {
+        if case .session(let s) = row, let pid = s.pid, Peer.canReach(pid: pid) {
+            Composer(pid: pid, onSent: { store.reload() })
         }
     }
 
@@ -403,13 +407,81 @@ private struct RowCard: View {
         }
     }
 
-    /// SwiftUI renders inline markdown but not tables, so a table arrives as its
-    /// own source. Readable, not right — a real renderer is its own slice.
-    private func markdown(_ text: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(text)
+}
+
+/// A line you can type into a running session.
+///
+/// Honest about what it is: Claude Code renders anything arriving this way as
+/// *"Another Claude session sent a message"*, with a preamble telling the session
+/// to treat the sender as a teammate rather than as its user. There is no mode
+/// that says otherwise, and there should not be — nothing outside the terminal
+/// should be able to impersonate the person at it. So this is a nudge, and the
+/// placeholder says so rather than letting anyone find out later.
+private struct Composer: View {
+    let pid: Int
+    let onSent: () -> Void
+
+    @State private var text = ""
+    @State private var problem: String?
+    @State private var sent = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.tight) {
+            HStack(spacing: Theme.Space.snug) {
+                TextField("Send a note to this session…", text: $text, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(Theme.Font.body)
+                    .lineLimit(1...4)
+                    .focused($focused)
+                    .onSubmit(send)
+                Button(action: send) {
+                    Image(systemName: sent ? "checkmark" : "arrow.up.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(sent ? AnyShapeStyle(Color.green)
+                                              : AnyShapeStyle(text.isEmpty ? AnyShapeStyle(HierarchicalShapeStyle.quaternary)
+                                                                           : AnyShapeStyle(Color.accentColor)))
+                }
+                .buttonStyle(.plain)
+                .disabled(text.isEmpty)
+            }
+            .padding(.horizontal, Theme.Space.step)
+            .padding(.vertical, Theme.Space.snug)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                    .fill(.primary.opacity(0.06))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                            .strokeBorder(focused ? Color.accentColor.opacity(0.5) : .clear, lineWidth: 1)))
+
+            if let problem {
+                Text(problem)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.orange)
+            } else {
+                Text("Arrives as a message from a peer session, not as you.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.quaternary)
+            }
+        }
+    }
+
+    private func send() {
+        let note = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !note.isEmpty else { return }
+        do {
+            try Peer.send(note, toPID: pid)
+            text = ""
+            problem = nil
+            withAnimation(Theme.hover) { sent = true }
+            onSent()
+            Task {
+                try? await Task.sleep(for: .seconds(1.6))
+                withAnimation(Theme.hover) { sent = false }
+            }
+        } catch {
+            problem = error.localizedDescription
+        }
     }
 }
 
