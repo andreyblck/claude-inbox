@@ -3,7 +3,12 @@
 Each slice is shippable on its own and leaves the machine in a working state.
 Nothing here touches the user-scope settings until S1 passes.
 
-## S0 — Spikes (no extension code)
+> **Done:** S0, S1, S1.5, S2, S3 — the permission round trip works end to end against
+> real Claude Code and is covered by `bridge/e2e.sh`, `bridge/install-test.sh`,
+> `bridge/selftest.sh` and `extension/test/`. S4 is unblocked: see S0.2/S0.3 below.
+> **Next:** S4, then S5.
+
+## S0 — Spikes (no extension code) — DONE
 
 Verify the three mechanisms the whole product rests on. Hooks are installed
 **project-scoped** in `.claude/settings.json` here, so only sessions started in this
@@ -24,13 +29,29 @@ folder are affected. Real work sessions are untouched.
 Exit criteria: four notes in `spikes/README.md`, each with the captured payload and
 a verdict of works / does not work / works with caveat.
 
-## S1 — Protocol + permission round trip
+**Result.** All four answered in `spikes/README.md`, against the 2.1.278 binary.
+The one that mattered: the decision is an **object** (`{"behavior": "allow"}`), not a
+string — and a wrong shape fails silently, falling through to the normal prompt so it
+reads as a timeout. S0.2/S0.3 work, with the caveat that `AskUserQuestion` and
+`ExitPlanMode` declare `requiresUserInteraction()`, so a bare allow is dropped: the
+answer has to ride in `updatedInput`. That is S4's design, and it is settled.
+
+## S1 — Protocol + permission round trip — DONE
 
 `hook-permission.sh`: write `pending/<req>.json`, poll `verdicts/<req>.json`, return
 the decision. Verdict written by hand (`echo`) — no UI yet. Proves the block-and-return
 path end to end and pins the file format.
 
-## S1.5 — Design system (no feature code)
+Two things this slice should have demanded and did not, both now in place:
+
+- **The test has to drive real Claude Code.** `selftest.sh` asserted the shape the
+  hook emitted, so it stayed green while nothing worked. `e2e.sh` runs a real
+  `claude -p` session and checks whether the tool ran.
+- **The pending file has to say who is holding it.** A hook killed with SIGKILL runs
+  no trap, and nothing else ever removed a pending file — one `kill -9` left a row
+  that could never be cleared. Every pending record now carries its holder's pid.
+
+## S1.5 — Design system (no feature code) — DONE
 
 DESIGN.md is the contract: the state vocabulary, the menu-bar rules, the inbox
 layout, the copy rules. Land it as `extension/src/lib/state.ts` (the eight states,
@@ -40,24 +61,32 @@ before any view is written, so both views read from one place and cannot drift.
 Exit criteria: every string a user can see comes from a formatter, not from a
 template literal inside a component.
 
-## S2 — Raycast inbox
+## S2 — Raycast inbox — DONE
 
 Two-pane `List` per DESIGN.md: sections Waiting / Running / Finished, tinted state
 icons, accessories for phase and age, detail pane with the ask, the command, what the
 session just did, and a metadata block. Actions: Approve ⌘↵, Deny ⌘⌫, Copy command,
 Reveal transcript. Empty state is a designed screen, not a blank list.
 
-## S3 — Menu bar
+## S3 — Menu bar — DONE
 
 `mode: menu-bar`, `interval: 10s` as a safety net; real refresh is the hook kicking a
-`launchType=background` deeplink. Monochrome glyph plus a count and nothing else in the
+`launchType=background` deeplink. Raycast refuses that deeplink until the user has
+activated the command, and says so in an error toast — once per turn, per session. The
+hook therefore nudges only after the menu bar command has run at least once and left
+its heartbeat. Monochrome glyph plus a count and nothing else in the
 bar; dropdown follows the three-section, five-row, one-line-per-row rules in DESIGN.md.
 ⌘1…⌘9 approve without reading.
 
-## S4 — Questions as a modal
+## S4 — Questions as a modal — NEXT
 
 `AskUserQuestion` / `ExitPlanMode` interception from S0.2/S0.3 wired to a Raycast
-form: options 1..4 plus a free-text field. Gated behind a preference
+form: options 1..4 plus a free-text field.
+
+Settled by S0: a bare allow is dropped for both tools, so the answer rides in
+`decision.updatedInput` — echo `questions` back with an `answers` map for
+`AskUserQuestion`; the plan text is already injected into `ExitPlanMode`'s input
+before hooks see it. Gated behind a preference
 (always / only when away / never) because interception is exclusive — while the hook
 waits, the terminal cannot answer.
 
@@ -77,10 +106,15 @@ New task without a terminal: `claude --bg`, cwd from recent projects. Plus
 Sessions report a phase (Morgan already names them: scope, track, pull, clean).
 Menu bar renders the pipeline, so a glance answers "who is where".
 
-## S8 — Doctor
+## S8 — Doctor (partly absorbed)
 
-Install and repair hooks, check notification permission and style, validate the
-terminal template, show bridge health.
+Much of what this was meant to catch is now caught at install time — `install.sh`
+validates its arguments, refuses a settings.json it cannot parse, keeps every backup,
+and recognises its own entries by script name so a moved repo does not leave a dead
+hook behind (`install-test.sh` covers all of it). What is left for a doctor is the
+part that needs the running system: notification permission and style, whether the
+menu bar command was ever activated, and bridge health across accounts — plus
+repairing an install someone has since edited by hand.
 
 ---
 

@@ -32,6 +32,27 @@ One vocabulary, shared by `bridge/` and the UI. Nothing renders a state not in t
 
 Only the four `blocked.*` states are "you". Everything else is weather.
 
+Two of these come from Claude Code's own registry rather than from a hook, so the
+vocabulary has to survive contact with theirs: `busy | shell | idle | waiting`.
+`waiting` is `blocked.dialog`. **`shell` is idle** — it means the user is at a `!`
+prompt, and painting that blue leaves a Working row standing for as long as someone
+sits in their shell. A status we do not recognise renders as running, never as
+something that needs you: inventing urgency is the one error this table exists to
+prevent.
+
+A `blocked.dialog` row says what the dialog wants (`waitingFor`, e.g. "input
+needed") rather than the state's own name. "Needs terminal" tells you where to go;
+it does not tell you whether it is worth going.
+
+### The prompt in the terminal does not go away
+
+Worth being honest about, because it shapes what this product is. In an interactive
+session Claude Code renders its permission dialog **and** runs the hook at the same
+time, racing them: whoever answers first wins, and the hook's answer tears the
+dialog down. So the bridge is a second, faster way to answer a prompt that is
+already there — never a replacement for it. That is also the safety story: if this
+whole product is down, nothing is blocked, because the terminal path never left.
+
 ## Menu bar
 
 The bar item answers one question in under 200 ms: **am I needed right now?**
