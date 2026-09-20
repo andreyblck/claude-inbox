@@ -5,6 +5,10 @@
 # anything is off. A silent hook means "no decision", and Claude Code continues
 # through its normal flow — so the bridge can only ever add a faster path, never
 # take the existing one away.
+#
+# Rule #2, learned the hard way: printing the *wrong* thing is worse than printing
+# nothing. An output that fails Claude Code's schema is surfaced into the session
+# as an error, and from the outside it looks exactly like a hook that timed out.
 
 INBOX_DIR="${CLAUDE_INBOX_DIR:-$HOME/.claude/inbox}"
 JQ=/usr/bin/jq
@@ -19,19 +23,27 @@ inbox_ready() {
 
 inbox_req_id() { /usr/bin/uuidgen | tr 'A-Z' 'a-z' | cut -c1-8; }
 
+# inbox_slug <path> — a filename-safe name for a config directory
+inbox_slug() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//'; }
+
 # inbox_write <dest>  — atomic, so a reader never catches a half-written file
 inbox_write() {
   local dest=$1 tmp="$1.$$.tmp"
-  cat > "$tmp" 2>/dev/null || return 1
-  mv -f "$tmp" "$dest" 2>/dev/null
+  cat > "$tmp" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  # An empty file is a row nothing can ever clear: jq failing mid-pipe still
+  # leaves `cat` a clean exit, so the emptiness is the only signal we get.
+  [ -s "$tmp" ] || { rm -f "$tmp" 2>/dev/null; return 1; }
+  mv -f "$tmp" "$dest" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
 }
 
 # inbox_wait <req_id> [timeout_s]  — echoes the verdict json, or returns 1 on timeout
 inbox_wait() {
   local f="$INBOX_DIR/verdicts/$1.json"
-  local deadline=$(( $(date +%s) + ${2:-300} ))
+  local timeout=${2:-300}
+  case "$timeout" in *[!0-9]*|"") timeout=300 ;; esac
+  local deadline=$(( $(date +%s) + timeout ))
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    if [ -f "$f" ]; then cat "$f" 2>/dev/null; rm -f "$f" 2>/dev/null; return 0; fi
+    if [ -s "$f" ]; then cat "$f" 2>/dev/null; rm -f "$f" 2>/dev/null; return 0; fi
     sleep 0.2
   done
   return 1
@@ -43,5 +55,76 @@ inbox_nudge() {
   local url="${CLAUDE_INBOX_NUDGE_URL:-}"
   [ -n "$url" ] || url=$(cat "$INBOX_DIR/nudge-url" 2>/dev/null)
   [ -n "$url" ] || return 0
+  # Raycast answers a background deeplink to a command nobody has enabled with
+  # "Command must be activated before it can be run in the background" — an error
+  # toast, on every turn of every session. The menu bar command writes this file
+  # when it runs, so its absence means there is nothing there to wake.
+  [ -f "$INBOX_DIR/heartbeat-menubar" ] || return 0
+  # A dozen sessions each ending a turn is a dozen launches a second. One redraw
+  # covers all of them; the 10s poll covers whatever this throttle skips.
+  local stamp="$INBOX_DIR/.nudged" now
+  now=$(date +%s)
+  if [ -f "$stamp" ]; then
+    local last
+    last=$(cat "$stamp" 2>/dev/null) || last=0
+    case "$last" in *[!0-9]*|"") last=0 ;; esac
+    [ $(( now - last )) -lt 1 ] && return 0
+  fi
+  printf '%s' "$now" > "$stamp" 2>/dev/null
   /usr/bin/open -g "$url" >/dev/null 2>&1 || true
+}
+
+# inbox_listening [grace_s] — is anything on the other end?
+#
+# Raycast writes a heartbeat every time either command runs, and the menu bar runs
+# on a 10s interval. Without this the hook blocks for its full timeout whenever
+# Raycast is quit — a silent freeze before every permission prompt, for a UI that
+# was never going to answer. The nudge above may itself launch Raycast, so a stale
+# heartbeat gets a short grace period rather than an immediate no.
+inbox_listening() {
+  local grace=${1:-3} beat="$INBOX_DIR/heartbeat" deadline
+  deadline=$(( $(date +%s) + grace ))
+  while :; do
+    if [ -f "$beat" ]; then
+      local ts now
+      ts=$(cat "$beat" 2>/dev/null) || ts=0
+      case "$ts" in *[!0-9]*|"") ts=0 ;; esac
+      now=$(date +%s)
+      [ $(( now - ts )) -lt 60 ] && return 0
+    fi
+    [ "$(date +%s)" -ge "$deadline" ] && return 1
+    sleep 0.3
+  done
+}
+
+# inbox_reap — the inbox is append-only unless someone sweeps it.
+#
+# A hook killed with SIGKILL leaves its pending file behind, and nothing else ever
+# removes one: the row sits in the UI for good, and approving it writes a verdict
+# no process is waiting for. Every pending file carries the pid of the hook holding
+# the request open, so a dead pid is a dead request.
+inbox_reap() {
+  local now f pid ts
+  now=$(date +%s)
+  for f in "$INBOX_DIR"/pending/*.json; do
+    [ -f "$f" ] || continue
+    [ -s "$f" ] || { rm -f "$f" 2>/dev/null; continue; }
+    pid=$("$JQ" -r '.pid // empty' "$f" 2>/dev/null)
+    [ -n "$pid" ] || continue                       # demo rows and old formats stay
+    kill -0 "$pid" 2>/dev/null || rm -f "$f" 2>/dev/null
+  done
+  # A verdict written after its hook gave up has nobody to consume it.
+  for f in "$INBOX_DIR"/verdicts/*.json; do
+    [ -f "$f" ] || continue
+    ts=$(/usr/bin/stat -f %m "$f" 2>/dev/null) || continue
+    [ $(( now - ts )) -gt 3600 ] && rm -f "$f" 2>/dev/null
+  done
+  # One file per session, forever, all of them parsed on every poll.
+  for f in "$INBOX_DIR"/sessions/*.json; do
+    [ -f "$f" ] || continue
+    ts=$("$JQ" -r '.ts // 0' "$f" 2>/dev/null) || continue
+    case "$ts" in *[!0-9]*|"") continue ;; esac
+    [ $(( now - ts )) -gt 172800 ] && rm -f "$f" 2>/dev/null
+  done
+  return 0
 }

@@ -34,11 +34,18 @@ MARKER="$PROJECT/it-ran.txt"
 
 fail=0
 check() { if [ "$2" = "$3" ]; then echo "  ok   $1"; else echo "  FAIL $1: expected [$3] got [$2]"; fail=1; fi; }
-cleanup() { [ -n "${watcher:-}" ] && kill "$watcher" 2>/dev/null; rm -rf "$ROOT"; }
+cleanup() {
+  [ -n "${watcher:-}" ] && kill "$watcher" 2>/dev/null
+  [ -n "${heart:-}" ] && kill "$heart" 2>/dev/null
+  rm -rf "$ROOT"
+}
 trap cleanup EXIT
 
-# The stand-in for Raycast: first pending request wins a verdict.
+# The stand-in for Raycast. The heartbeat matters as much as the verdict: the hook
+# refuses to block when nothing is listening, so a harness that only writes
+# verdicts tests the "Raycast is quit" path by accident.
 captured="$ROOT/captured.json"
+( while :; do date +%s > "$CLAUDE_INBOX_DIR/heartbeat"; sleep 2; done ) & heart=$!
 if [ "$MODE" != silent ]; then
   ( for _ in $(seq 1 600); do
       for f in "$CLAUDE_INBOX_DIR"/pending/*.json; do

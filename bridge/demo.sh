@@ -10,13 +10,23 @@ cd "$(dirname "$0")" 2>/dev/null || exit 1
 inbox_ready || { echo "cannot prepare $INBOX_DIR"; exit 1; }
 mkdir -p "$INBOX_DIR/usage"
 
+stop_watcher() {
+  # The marker used to be the only handle on the watcher, and `clear_demo` removed
+  # it a line before the next run re-created it — so the old loop never noticed and
+  # every run left one more behind. Kill by pid, then drop the marker.
+  local pid
+  pid=$(cat "$INBOX_DIR/.demo-watcher" 2>/dev/null) || pid=""
+  case "$pid" in ''|*[!0-9]*) ;; *) kill "$pid" 2>/dev/null ;; esac
+  rm -f "$INBOX_DIR/.demo-watcher"
+}
+
 clear_demo() {
   local n=0
   for f in "$INBOX_DIR"/pending/*.json "$INBOX_DIR"/sessions/*.json "$INBOX_DIR"/usage/*.json; do
     [ -f "$f" ] || continue
     if [ "$("$JQ" -r '.demo // false' "$f" 2>/dev/null)" = "true" ]; then rm -f "$f"; n=$((n + 1)); fi
   done
-  rm -f "$INBOX_DIR/.demo-watcher"
+  stop_watcher
   echo "removed $n demo files"
 }
 
@@ -61,8 +71,8 @@ sess demo-s9 failed "$HOME/work/bunker123" "" 600 "Build failed: missing DATABAS
 
 # Stand in for the waiting hook: a verdict must make the row disappear, or the
 # UI reads as broken during a demo.
-if [ ! -f "$INBOX_DIR/.demo-watcher" ]; then
-  touch "$INBOX_DIR/.demo-watcher"
+stop_watcher
+if true; then
   ( for _ in $(seq 1 12000); do
       [ -f "$INBOX_DIR/.demo-watcher" ] || break
       for v in "$INBOX_DIR"/verdicts/*.json; do
@@ -72,7 +82,8 @@ if [ ! -f "$INBOX_DIR/.demo-watcher" ]; then
         if [ -f "$p" ] && [ "$("$JQ" -r '.demo // false' "$p" 2>/dev/null)" = "true" ]; then rm -f "$p" "$v"; fi
       done
       sleep 0.3
-    done; rm -f "$INBOX_DIR/.demo-watcher" ) >/dev/null 2>&1 &
+    done ) >/dev/null 2>&1 &
+  printf '%s' "$!" > "$INBOX_DIR/.demo-watcher"
   disown 2>/dev/null || true
 fi
 

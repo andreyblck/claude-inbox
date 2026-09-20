@@ -1,6 +1,6 @@
 import { Action, ActionPanel, Icon, List, Toast, showToast } from "@raycast/api";
 import { getProgressIcon, usePromise } from "@raycast/utils";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   accountLabel,
   mergeRows,
@@ -9,6 +9,7 @@ import {
   readRecentActivity,
   readSessions,
   readUsage,
+  touchHeartbeat,
   writeVerdict,
   type Row,
   type UsageRecord,
@@ -26,10 +27,20 @@ import {
   type StateGroup,
 } from "./lib/state";
 
-const POLL_MS = 1000;
+/** Rows are cheap local file reads; the transcript tail is not. */
+const ROWS_POLL_MS = 1000;
+const ACTIVITY_POLL_MS = 4000;
+
+function useInterval(revalidate: () => void, ms: number) {
+  useEffect(() => {
+    const timer = setInterval(revalidate, ms);
+    return () => clearInterval(timer);
+  }, [revalidate, ms]);
+}
 
 function useInbox() {
   const { data, isLoading, revalidate } = usePromise(async () => {
+    await touchHeartbeat("inbox");
     const [pending, sessions, live, usage] = await Promise.all([
       readPending(),
       readSessions(),
@@ -38,11 +49,16 @@ function useInbox() {
     ]);
     return { rows: mergeRows(pending, sessions, live).sort(bySeverity), usage };
   });
-  useEffect(() => {
-    const timer = setInterval(revalidate, POLL_MS);
-    return () => clearInterval(timer);
-  }, [revalidate]);
-  return { rows: data?.rows ?? [], usage: data?.usage ?? [], isLoading, revalidate };
+  useInterval(revalidate, ROWS_POLL_MS);
+  return {
+    rows: data?.rows ?? [],
+    usage: data?.usage ?? [],
+    // `usePromise` flips isLoading on every revalidate, so binding it straight to
+    // the List makes the loading bar pulse once a second forever. Only the first
+    // load has nothing to show.
+    isLoading: isLoading && !data,
+    revalidate,
+  };
 }
 
 function rowProject(row: Row): string {
@@ -53,7 +69,8 @@ function rowProject(row: Row): string {
 
 function rowAsk(row: Row): string {
   if (row.kind === "pending") return askPhrase(row.pending);
-  return row.session.phase ?? STATES[row.state].label.toLowerCase();
+  // A dialog the terminal owns says what it wants; that beats the state name.
+  return row.session.waiting_for ?? row.session.phase ?? STATES[row.state].label.toLowerCase();
 }
 
 function rowTranscript(row: Row): string | undefined {
@@ -102,13 +119,14 @@ function Detail({ row, activity }: { row: Row; activity: string[] }) {
 function UsageDetail({ usage }: { usage: UsageRecord }) {
   const five = usage.rate_limits?.five_hour;
   const week = usage.rate_limits?.seven_day;
-  const line = (label: string, value?: number, resetsAt?: number) => {
+  const line = (label: string, value?: number | null, resetsAt?: number | null) => {
     if (value === undefined || value === null) return `- **${label}** — no data yet`;
     const filled = Math.round(Math.min(100, value) / 10);
-    return `- **${label}** \`${"█".repeat(filled)}${"░".repeat(10 - filled)}\` ${pct(value)}${
-      resetsIn(resetsAt) ? ` · ${resetsIn(resetsAt)}` : ""
-    }`;
+    const reset = resetsIn(resetsAt ?? undefined);
+    return `- **${label}** \`${"█".repeat(filled)}${"░".repeat(10 - filled)}\` ${pct(value)}${reset ? ` · ${reset}` : ""}`;
   };
+  const context = usage.context?.used_percentage;
+  const cost = usage.cost?.total_cost_usd;
   return (
     <List.Item.Detail
       markdown={[
@@ -124,11 +142,13 @@ function UsageDetail({ usage }: { usage: UsageRecord }) {
           <List.Item.Detail.Metadata.Label title="Account" text={accountLabel(usage.config_dir)} />
           <List.Item.Detail.Metadata.Label title="Config" text={usage.config_dir} />
           {usage.model ? <List.Item.Detail.Metadata.Label title="Model" text={usage.model} /> : null}
-          {usage.context?.used_percentage !== undefined ? (
-            <List.Item.Detail.Metadata.Label title="Context" text={pct(usage.context.used_percentage) ?? "—"} />
+          {/* A reading of `null` is "not measured yet", which is not a row worth
+              printing — and `!== undefined` lets it through as an em dash. */}
+          {typeof context === "number" ? (
+            <List.Item.Detail.Metadata.Label title="Context" text={pct(context) ?? "—"} />
           ) : null}
-          {usage.cost?.total_cost_usd !== undefined ? (
-            <List.Item.Detail.Metadata.Label title="Session cost" text={`$${usage.cost.total_cost_usd.toFixed(2)}`} />
+          {typeof cost === "number" ? (
+            <List.Item.Detail.Metadata.Label title="Session cost" text={`$${cost.toFixed(2)}`} />
           ) : null}
         </List.Item.Detail.Metadata>
       }
@@ -140,13 +160,19 @@ export default function Command() {
   const { rows, usage, isLoading, revalidate } = useInbox();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const { data: activity } = usePromise(
-    async (id: string | null) => {
-      const row = rows.find((r) => r.id === id);
-      return row ? readRecentActivity(rowTranscript(row)) : [];
-    },
-    [selectedId],
+  // Keyed by the transcript path, not by the row id: the path is what the read
+  // actually depends on, so this refires when rows first arrive (the selection
+  // lands before the first read resolves) and not on every unrelated poll.
+  const selectedTranscript = useMemo(() => {
+    const row = rows.find((r) => r.id === selectedId);
+    return row ? rowTranscript(row) : undefined;
+  }, [rows, selectedId]);
+
+  const { data: activity, revalidate: revalidateActivity } = usePromise(
+    async (path?: string) => readRecentActivity(path),
+    [selectedTranscript],
   );
+  useInterval(revalidateActivity, ACTIVITY_POLL_MS);
 
   async function decide(row: Row, decision: "allow" | "deny") {
     if (row.kind !== "pending") return;
@@ -166,6 +192,10 @@ export default function Command() {
       isLoading={isLoading}
       isShowingDetail
       searchBarPlaceholder="Filter sessions"
+      // Rows are rebuilt every second and reorder as states change, which moves
+      // an item between sections. Naming the selection keeps it on the row the
+      // person was reading instead of snapping back to the top.
+      selectedItemId={selectedId ?? undefined}
       onSelectionChange={setSelectedId}
     >
       <List.EmptyView
@@ -231,18 +261,19 @@ export default function Command() {
           {usage.map((u) => {
             const five = u.rate_limits?.five_hour?.used_percentage;
             const week = u.rate_limits?.seven_day?.used_percentage;
+            const peak = week ?? five ?? 0;
             return (
               <List.Item
                 key={u.config_dir}
                 id={`usage:${u.config_dir}`}
-                icon={getProgressIcon((week ?? five ?? 0) / 100, usageTint(week ?? five ?? 0))}
+                icon={getProgressIcon(peak / 100, usageTint(peak))}
                 title={accountLabel(u.config_dir)}
                 subtitle={usageLine(u)}
                 accessories={[
-                  ...(five !== undefined
+                  ...(typeof five === "number"
                     ? [{ icon: getProgressIcon(five / 100, usageTint(five)), tooltip: `5 hours: ${pct(five)}` }]
                     : []),
-                  ...(week !== undefined
+                  ...(typeof week === "number"
                     ? [{ icon: getProgressIcon(week / 100, usageTint(week)), tooltip: `7 days: ${pct(week)}` }]
                     : []),
                 ]}

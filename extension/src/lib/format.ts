@@ -4,7 +4,7 @@ import { age, LIMITS, oneLine, truncate } from "./state";
 import type { UsageRecord } from "./inbox";
 
 /** "resets in 2h 14m" — a countdown answers "can I keep going", a timestamp doesn't. */
-export function resetsIn(resetsAt?: number, now = Date.now()): string | undefined {
+export function resetsIn(resetsAt?: number | null, now = Date.now()): string | undefined {
   if (!resetsAt) return undefined;
   const secs = Math.round(resetsAt - now / 1000);
   if (secs <= 0) return "resetting";
@@ -23,8 +23,8 @@ export function usageTint(percentage: number): Color {
   return Color.SecondaryText;
 }
 
-export function pct(value?: number): string | undefined {
-  return value === undefined || value === null ? undefined : `${Math.round(value)}%`;
+export function pct(value?: number | null): string | undefined {
+  return typeof value === "number" ? `${Math.round(value)}%` : undefined;
 }
 
 /**

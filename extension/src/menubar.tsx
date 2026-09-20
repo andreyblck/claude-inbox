@@ -6,6 +6,7 @@ import {
   readPending,
   readSessions,
   readUsage,
+  touchHeartbeat,
   writeVerdict,
   type Row,
 } from "./lib/inbox";
@@ -22,7 +23,9 @@ function project(row: Row): string {
 }
 
 function ask(row: Row): string {
-  return row.kind === "pending" ? askPhrase(row.pending) : (row.session.phase ?? STATES[row.state].label.toLowerCase());
+  if (row.kind === "pending") return askPhrase(row.pending);
+  // A dialog the terminal owns says what it wants; that beats the state name.
+  return row.session.waiting_for ?? row.session.phase ?? STATES[row.state].label.toLowerCase();
 }
 
 /** Five rows, then a submenu. A menu that scrolls has already failed. */
@@ -32,6 +35,7 @@ function capped<T>(items: T[], limit: number = LIMITS.menuSection): [T[], T[]] {
 
 export default function Command() {
   const { data, isLoading, revalidate } = usePromise(async () => {
+    await touchHeartbeat("menubar");
     const [pending, sessions, live, usage] = await Promise.all([
       readPending(),
       readSessions(),

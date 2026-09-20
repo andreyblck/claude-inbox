@@ -42,6 +42,8 @@ export const STATES: Record<InboxState, StateMeta> = {
   failed: { label: "Failed", icon: Icon.XMarkCircle, tint: Color.Red, group: "finished", rank: 1 },
 };
 
+const GROUP_ORDER: Record<StateGroup, number> = { waiting: 0, running: 1, finished: 2 };
+
 export const GROUP_TITLES: Record<StateGroup, string> = {
   waiting: "Waiting for you",
   running: "Running",
@@ -77,6 +79,14 @@ export type PendingItem = {
   tool_input?: Record<string, unknown>;
   permission_mode?: string;
   transcript_path?: string;
+  /** Claude Code's id for the user turn this request belongs to. */
+  prompt_id?: string;
+  /**
+   * What Claude Code itself offers as a broader grant — trusting the directory,
+   * switching to acceptEdits. It arrives ready-made in the hook payload, which
+   * is what "allow and stop asking" is built from rather than a rule we invent.
+   */
+  permission_suggestions?: unknown[];
 };
 
 export type SessionRecord = {
@@ -88,6 +98,10 @@ export type SessionRecord = {
   name?: string;
   /** Present when the session is in Claude Code's live registry. */
   pid?: number;
+  /** What a session in `blocked.dialog` is waiting for, when the registry says. */
+  waiting_for?: string;
+  /** The config directory this session belongs to — an account. */
+  config_dir?: string;
   demo?: boolean;
   /** Set by the Morgan phase reporter: "track", "pull", "clean"… */
   phase?: string;
@@ -181,8 +195,18 @@ export function rowTitle(project: string, ask: string): string {
   return `${project} · ${ask}`;
 }
 
+/**
+ * Within a group: by rank, then by age — oldest first, because the thing that
+ * has been waiting longest is the thing you have kept waiting.
+ *
+ * "Recently finished" is the exception and reverses it: nothing there is
+ * waiting, and the only question a person asks of that section is "what just
+ * landed?". Sorting results oldest-first buries the answer.
+ */
 export function bySeverity(a: { state: InboxState; ts: number }, b: { state: InboxState; ts: number }): number {
-  const ra = STATES[a.state].rank;
-  const rb = STATES[b.state].rank;
-  return ra !== rb ? ra - rb : a.ts - b.ts;
+  const ma = STATES[a.state];
+  const mb = STATES[b.state];
+  if (ma.group !== mb.group) return GROUP_ORDER[ma.group] - GROUP_ORDER[mb.group];
+  if (ma.rank !== mb.rank) return ma.rank - mb.rank;
+  return ma.group === "finished" ? b.ts - a.ts : a.ts - b.ts;
 }
