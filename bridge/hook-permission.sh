@@ -42,6 +42,15 @@ case "$decision" in
 esac
 reason=$(printf '%s' "$verdict" | "$JQ" -r '.reason // "Answered in Raycast"' 2>/dev/null)
 
-"$JQ" -n --arg d "$decision" --arg r "$reason" \
-  '{hookSpecificOutput: {hookEventName: "PermissionRequest", decision: $d, reason: $r}}'
+# The contract, verbatim from the binary's own validator:
+#   {behavior: "allow", updatedInput?: object} | {behavior: "deny", message: string}
+# `decision` is an OBJECT. A string here fails schema validation, the decision is
+# dropped silently, and the session falls back to the terminal prompt — which looks
+# exactly like the hook timing out, so get this shape wrong and nothing tells you.
+"$JQ" -n --arg d "$decision" --arg r "$reason" '{
+  hookSpecificOutput: {
+    hookEventName: "PermissionRequest",
+    decision: (if $d == "allow" then {behavior: "allow"} else {behavior: "deny", message: $r} end)
+  }
+}'
 exit 0

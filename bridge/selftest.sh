@@ -23,9 +23,26 @@ echo "1. verdict arrives -> decision is returned"
   done ) &
 out=$(printf '%s' "$PAYLOAD" | CLAUDE_INBOX_PERMISSION_TIMEOUT=10 ./hook-permission.sh)
 wait
-check "decision" "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision')" "allow"
-check "event"    "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.hookEventName')" "PermissionRequest"
-check "reason"   "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.reason')" "approved in test"
+# Shape per the binary's validator: decision is an OBJECT keyed by `behavior`.
+# A string there is dropped silently, so assert the object, not just the word.
+check "event"         "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.hookEventName')" "PermissionRequest"
+check "behavior"      "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision.behavior')" "allow"
+check "decision type" "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision | type')" "object"
+check "allow is bare" "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision | keys | join(",")')" "behavior"
+
+echo "1b. deny carries the message the model is told"
+( for _ in $(seq 1 100); do
+    f=$(ls "$CLAUDE_INBOX_DIR/pending"/*.json 2>/dev/null | head -1) || true
+    if [ -n "${f:-}" ]; then
+      echo '{"decision":"deny","reason":"not on staging"}' > "$CLAUDE_INBOX_DIR/verdicts/$(basename "$f" .json).json"
+      exit 0
+    fi
+    sleep 0.1
+  done ) &
+out=$(printf '%s' "$PAYLOAD" | CLAUDE_INBOX_PERMISSION_TIMEOUT=10 ./hook-permission.sh)
+wait
+check "deny behavior" "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision.behavior')" "deny"
+check "deny message"  "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision.message')" "not on staging"
 
 echo "2. timeout -> no output, exit 0, pending cleaned up"
 out=$(printf '%s' "$PAYLOAD" | CLAUDE_INBOX_PERMISSION_TIMEOUT=1 ./hook-permission.sh); rc=$?

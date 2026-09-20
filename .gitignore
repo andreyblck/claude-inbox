@@ -3,3 +3,4 @@ node_modules/
 spikes/captured/*.json
 extension/dist/
 *.log
+.camp/
