@@ -114,6 +114,56 @@ final class InboxStore {
         decide(row, allow: allow)
     }
 
+    // MARK: - Starting and summarising
+
+    private(set) var digest: String?
+    private(set) var working = false
+    private(set) var problem: String?
+
+    /// One paragraph for a dozen sessions — the question a person comes back to
+    /// the machine with, which no single row answers.
+    func summarise() {
+        guard !working else { return }
+        working = true
+        problem = nil
+        let rows = self.rows
+        Task.detached(priority: .userInitiated) {
+            do {
+                let text = try Digest.make(for: rows)
+                await MainActor.run { self.digest = text; self.working = false }
+            } catch {
+                await MainActor.run { self.problem = error.localizedDescription; self.working = false }
+            }
+        }
+    }
+
+    func clearDigest() {
+        digest = nil
+        problem = nil
+    }
+
+    /// A session started here runs on the account chosen here and can be picked
+    /// up in a terminal later — nothing is lost by starting it from a panel.
+    func launch(prompt: String, directory: String, configDir: String?) {
+        guard !working else { return }
+        working = true
+        problem = nil
+        Task.detached(priority: .userInitiated) {
+            do {
+                _ = try Launcher.start(prompt: prompt, in: directory, configDir: configDir)
+                await MainActor.run {
+                    self.working = false
+                    self.reload()
+                }
+            } catch {
+                await MainActor.run {
+                    self.problem = error.localizedDescription
+                    self.working = false
+                }
+            }
+        }
+    }
+
     func decide(_ row: Row, allow: Bool) {
         guard case .pending(let item) = row else { return }
         let decision = allow ? "allow" : "deny"

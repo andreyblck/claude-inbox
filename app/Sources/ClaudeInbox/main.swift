@@ -248,6 +248,21 @@ if CommandLine.arguments.contains("--login-status") {
     exit(0)
 }
 
+if CommandLine.arguments.contains("--accounts") {
+    for account in Accounts.all(force: true) {
+        print("\(account.loggedIn ? "✓" : "·") \(account.label.padding(toLength: 14, withPad: " ", startingAt: 0))"
+            + " \(account.subscription ?? "—")  \(Format.shortPath(account.configDir))")
+    }
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--digest") {
+    let rows = Inbox.merge(
+        pending: Inbox.readPending(), hooked: Inbox.readSessions(), live: Inbox.readLiveSessions())
+    do { print(try Digest.make(for: rows)) } catch { print("failed: \(error)") }
+    exit(0)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

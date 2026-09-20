@@ -5,11 +5,21 @@ import SwiftUI
 struct InboxView: View {
     @Bindable var store: InboxStore
     @State private var contentHeight: CGFloat = 0
+    @State private var composing = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Header(store: store)
+            Header(store: store, composing: $composing)
             Divider().opacity(0.5)
+
+            if composing {
+                NewTask(store: store, composing: $composing)
+                Divider().opacity(0.5)
+            }
+            if store.digest != nil || store.problem != nil {
+                DigestBanner(store: store)
+                Divider().opacity(0.5)
+            }
 
             Group {
                 if !store.bridgeInstalled {
@@ -94,6 +104,7 @@ struct InboxView: View {
 
 private struct Header: View {
     @Bindable var store: InboxStore
+    @Binding var composing: Bool
     @State private var hoveringQuit = false
 
     var body: some View {
@@ -107,6 +118,19 @@ private struct Header: View {
             }
 
             Spacer(minLength: Theme.Space.gap)
+
+            // One paragraph for a dozen sessions. The question nobody can answer
+            // by reading rows one at a time.
+            IconButton(symbol: store.working ? "hourglass" : "sparkles",
+                       help: "What happened while you were away") {
+                store.summarise()
+            }
+            .disabled(store.working)
+
+            IconButton(symbol: composing ? "xmark" : "plus",
+                       help: "Start a session without a terminal") {
+                withAnimation(Theme.expand) { composing.toggle() }
+            }
 
             if let usage = store.usage.first {
                 HStack(spacing: Theme.Space.snug) {
@@ -142,6 +166,125 @@ private struct Header: View {
         if !store.answered.isEmpty { parts.append("\(store.answered.count) answered") }
         if !store.running.isEmpty { parts.append("\(store.running.count) running") }
         return parts.isEmpty ? "all quiet" : parts.joined(separator: " · ")
+    }
+}
+
+/// A small square button, for the things the header does.
+private struct IconButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(hovering ? AnyShapeStyle(Color.primary)
+                                          : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                        .fill(.primary.opacity(hovering ? 0.1 : 0.05)))
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { value in withAnimation(Theme.hover) { hovering = value } }
+    }
+}
+
+/// Starting a session: what to do, where, and on which account.
+private struct NewTask: View {
+    @Bindable var store: InboxStore
+    @Binding var composing: Bool
+
+    @State private var prompt = ""
+    @State private var directory = ""
+    @State private var configDir = Accounts.preferred
+    @FocusState private var focused: Bool
+
+    private var folders: [String] { Launcher.recentDirectories(from: store.rows) }
+    private var accounts: [Accounts.Account] { Accounts.all().filter(\.loggedIn) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.step) {
+            TextField("What should it do?", text: $prompt, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(Theme.Font.body)
+                .lineLimit(1...5)
+                .focused($focused)
+
+            HStack(spacing: Theme.Space.step) {
+                Picker("", selection: $directory) {
+                    Text("Pick a folder").tag("")
+                    ForEach(folders, id: \.self) { folder in
+                        Text(Format.shortPath(folder)).tag(folder)
+                    }
+                }
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: 210)
+
+                if accounts.count > 1 {
+                    // Switching is an action on the next session, not on the ones
+                    // running: a session is bound to the account it started with.
+                    Picker("", selection: $configDir) {
+                        ForEach(accounts) { account in
+                            Text(account.label).tag(account.configDir)
+                        }
+                    }
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .frame(maxWidth: 120)
+                }
+
+                Spacer(minLength: 0)
+                Button("Start") { start() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(prompt.isEmpty || directory.isEmpty || store.working)
+            }
+        }
+        .padding(.horizontal, Theme.Space.wide)
+        .padding(.vertical, Theme.Space.gap)
+        .onAppear {
+            focused = true
+            if directory.isEmpty { directory = folders.first ?? "" }
+        }
+    }
+
+    private func start() {
+        Accounts.preferred = configDir
+        store.launch(prompt: prompt, directory: directory, configDir: configDir)
+        prompt = ""
+        withAnimation(Theme.expand) { composing = false }
+    }
+}
+
+/// The digest, or why there isn't one.
+private struct DigestBanner: View {
+    @Bindable var store: InboxStore
+
+    var body: some View {
+        HStack(alignment: .top, spacing: Theme.Space.step) {
+            Image(systemName: store.problem == nil ? "sparkles" : "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(store.problem == nil ? Color.accentColor : .orange)
+                .padding(.top, 1)
+            if let problem = store.problem {
+                Text(problem)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let digest = store.digest {
+                MarkdownView(text: digest)
+            }
+            Spacer(minLength: Theme.Space.step)
+            IconButton(symbol: "xmark", help: "Dismiss") { store.clearDigest() }
+        }
+        .padding(.horizontal, Theme.Space.wide)
+        .padding(.vertical, Theme.Space.gap)
+        .background(Color.accentColor.opacity(store.problem == nil ? 0.07 : 0))
     }
 }
 
