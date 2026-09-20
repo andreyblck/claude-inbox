@@ -1,127 +1,152 @@
 import SwiftUI
 
-/// The panel. This is what Raycast could not render and why the app exists: a
-/// card you can open and read an answer in, with the decision on the same card.
+/// The panel. This is what a menu row could not be and why the app exists: a
+/// card you open and read the whole answer in, with the decision on that card.
 struct InboxView: View {
     @Bindable var store: InboxStore
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
-            if !store.bridgeInstalled {
-                notInstalled
-            } else if store.rows.isEmpty {
-                empty
-            } else {
-                list
-            }
-            if let account = store.usage.first {
-                Divider()
-                UsageBar(usage: account)
-            }
-        }
-        .frame(width: 460)
-        .frame(maxHeight: 620)
-    }
+            Header(store: store)
+            Divider().opacity(0.5)
 
-    private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "tray.full")
-                .foregroundStyle(.secondary)
-            Text("Claude Inbox")
-                .font(.system(size: 13, weight: .semibold))
-            Spacer()
-            if !store.waiting.isEmpty {
-                Text("\(store.waiting.count) waiting")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.yellow)
+            Group {
+                if !store.bridgeInstalled {
+                    Placeholder(
+                        symbol: "powerplug",
+                        tint: .orange,
+                        title: "The bridge is not installed",
+                        // A quiet machine and a disconnected one look identical
+                        // to a reader. Say which one this is.
+                        detail: "Run bridge/install.sh once. Until then nothing reports in.")
+                } else if store.rows.isEmpty {
+                    Placeholder(
+                        symbol: "checkmark.circle",
+                        tint: .green,
+                        title: "Nothing needs you",
+                        detail: "Sessions appear the moment one blocks on a decision.")
+                } else {
+                    list
+                }
             }
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Image(systemName: "power")
+
+            if let account = store.usage.first {
+                Divider().opacity(0.5)
+                Footer(usage: account)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .help("Quit Claude Inbox")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .frame(width: Theme.panelWidth)
+        .frame(maxHeight: Theme.panelMaxHeight)
+        .background(VisualEffect())
     }
 
     private var list: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
+            LazyVStack(alignment: .leading, spacing: Theme.Space.wide) {
                 section(.waiting, store.waiting)
                 section(.answered, store.answered)
                 section(.running, store.running)
                 section(.finished, store.finished)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 12)
+            .padding(.horizontal, Theme.Space.gap)
+            .padding(.vertical, Theme.Space.gap)
         }
+        .scrollIndicators(.never)
     }
 
     @ViewBuilder
     private func section(_ group: StateGroup, _ rows: [Row]) -> some View {
-        // Empty sections vanish. A panel has no room for placeholders saying
-        // nothing is here.
+        // Empty sections vanish. A panel has no room for a heading over nothing.
         if !rows.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(group.title.uppercased())
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .padding(.leading, 4)
-                ForEach(rows) { row in
-                    RowCard(row: row, store: store)
+            VStack(alignment: .leading, spacing: Theme.Space.snug) {
+                HStack(spacing: Theme.Space.snug) {
+                    Text(group.title.uppercased())
+                        .font(Theme.Font.section)
+                        .tracking(0.6)
+                        .foregroundStyle(.tertiary)
+                    Text("\(rows.count)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.quaternary)
+                    Spacer()
+                }
+                .padding(.leading, Theme.Space.tight)
+
+                VStack(spacing: Theme.Space.snug) {
+                    ForEach(rows) { row in
+                        RowCard(row: row, store: store)
+                    }
                 }
             }
         }
     }
+}
 
-    private var empty: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "checkmark.circle")
-                .font(.system(size: 28))
-                .foregroundStyle(.green.opacity(0.8))
-            Text("Nothing needs you")
-                .font(.system(size: 13, weight: .medium))
-            Text("Sessions appear the moment one blocks on a decision.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+// MARK: - Header
+
+private struct Header: View {
+    @Bindable var store: InboxStore
+    @State private var hoveringQuit = false
+
+    var body: some View {
+        HStack(spacing: Theme.Space.step) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Claude Inbox")
+                    .font(Theme.Font.title)
+                Text(summary)
+                    .font(Theme.Font.micro)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer(minLength: Theme.Space.gap)
+
+            if let usage = store.usage.first {
+                HStack(spacing: Theme.Space.snug) {
+                    UsageRing(label: "5h", percentage: usage.rateLimits?.fiveHour?.usedPercentage)
+                    UsageRing(label: "7d", percentage: usage.rateLimits?.sevenDay?.usedPercentage)
+                }
+                .help("Rate limits. They only move while a session is talking.")
+            }
+
+            Button {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Image(systemName: "power")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(hoveringQuit ? AnyShapeStyle(Color.primary)
+                                                  : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+            }
+            .buttonStyle(.plain)
+            .help("Quit Claude Inbox")
+            .onHover { hovering in
+                withAnimation(Theme.hover) { hoveringQuit = hovering }
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 44)
+        .padding(.horizontal, Theme.Space.wide)
+        .padding(.vertical, Theme.Space.gap)
     }
 
-    private var notInstalled: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "powerplug")
-                .font(.system(size: 28))
-                .foregroundStyle(.orange.opacity(0.9))
-            Text("The bridge is not installed")
-                .font(.system(size: 13, weight: .medium))
-            // A quiet machine and a disconnected one look identical; say which.
-            Text("Run bridge/install.sh once. Until then nothing reports in.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
-        .padding(.horizontal, 20)
+    /// The one line that answers "what is the state of everything" without
+    /// anyone having to count rows.
+    private var summary: String {
+        var parts: [String] = []
+        if !store.waiting.isEmpty { parts.append("\(store.waiting.count) waiting") }
+        if !store.answered.isEmpty { parts.append("\(store.answered.count) answered") }
+        if !store.running.isEmpty { parts.append("\(store.running.count) running") }
+        return parts.isEmpty ? "all quiet" : parts.joined(separator: " · ")
     }
 }
 
-/// One session, openable. Closed it is a line you scan; open it is the thing you
-/// would have gone to the terminal for.
+// MARK: - Row
+
+/// One session. Closed it is a line you scan; open it is the thing you would
+/// have gone to the terminal for.
 private struct RowCard: View {
     let row: Row
     @Bindable var store: InboxStore
     @State private var hovering = false
 
     private var isOpen: Bool { store.openRowID == row.id }
+    private var isBlocked: Bool { row.state.isBlocked }
 
     private var project: String {
         switch row {
@@ -140,103 +165,131 @@ private struct RowCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                store.open(isOpen ? nil : row)
-            } label: {
-                head
-            }
-            .buttonStyle(.plain)
-
-            if isOpen {
-                expanded(for: row)
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
+            head
+            if isOpen { details }
+        }
+        .background(background)
+        .overlay(alignment: .leading) {
+            // A blocked row is the only thing in this panel that is *about* you.
+            // The accent says so before any word is read.
+            if isBlocked {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(row.state.tint)
+                    .frame(width: 3)
+                    .padding(.vertical, Theme.Space.step)
+                    .padding(.leading, Theme.Space.tight)
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 9)
-                .fill(.quaternary.opacity(hovering || isOpen ? 0.55 : 0.28))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(row.state.isBlocked ? row.state.tint.opacity(0.35) : .clear, lineWidth: 1)
-        )
-        .onHover { hovering = $0 }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(Theme.expand) { store.open(isOpen ? nil : row) }
+        }
+        .onHover { value in
+            withAnimation(Theme.hover) { hovering = value }
+        }
+    }
+
+    private var background: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+            .fill(isBlocked
+                  ? AnyShapeStyle(row.state.tint.opacity(hovering ? 0.16 : 0.11))
+                  : AnyShapeStyle(Color.primary.opacity(hovering || isOpen ? 0.07 : 0.04)))
     }
 
     private var head: some View {
-        HStack(alignment: .top, spacing: 9) {
-            Image(systemName: row.state.symbol)
-                .font(.system(size: 11))
-                .foregroundStyle(row.state.tint)
-                .frame(width: 14, height: 16)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
+        HStack(alignment: .top, spacing: Theme.Space.step) {
+            glyph
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: Theme.Space.snug) {
                     // A column of short names is what the eye scans; the sentence
                     // beside it is read only on the row it stopped at.
                     Text(project)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(Theme.Font.row)
                         .lineLimit(1)
                     if case .session(let s) = row, let phase = s.phase {
                         Text(phase)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 9.5, weight: .semibold))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(.quaternary.opacity(0.7)))
+                            .padding(.vertical, 1.5)
+                            .background(
+                                RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
+                                    .fill(.primary.opacity(0.08)))
                     }
-                    Spacer(minLength: 4)
+                    Spacer(minLength: Theme.Space.tight)
                     Text(Format.age(row.ts))
-                        .font(.system(size: 10))
+                        .font(Theme.Font.micro)
                         .foregroundStyle(.tertiary)
+                        .monospacedDigit()
                 }
                 Text(subject)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(isOpen ? 3 : 2)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(isBlocked ? AnyShapeStyle(Color.primary)
+                                               : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+                    .lineLimit(isOpen ? 4 : 2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+
+                // The decision is the whole job. It does not hide behind a click.
+                if case .pending = row { decision }
             }
         }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 9)
-        .contentShape(Rectangle())
+        .padding(.horizontal, Theme.Space.gap)
+        .padding(.vertical, Theme.Space.step + 2)
+        .padding(.leading, isBlocked ? Theme.Space.tight : 0)
+    }
+
+    private var glyph: some View {
+        Image(systemName: row.state.symbol)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(row.state.tint)
+            .frame(width: 22, height: 22)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                    .fill(row.state.tint.opacity(0.14)))
+            .padding(.top, 1)
+    }
+
+    private var decision: some View {
+        HStack(spacing: Theme.Space.snug) {
+            Button("Approve") { store.decide(row, allow: true) }
+                .buttonStyle(.borderedProminent)
+                .tint(row.state.tint)
+            Button("Deny") { store.decide(row, allow: false) }
+                .buttonStyle(.bordered)
+            Spacer()
+        }
+        .controlSize(.small)
+        .padding(.top, Theme.Space.tight)
     }
 
     @ViewBuilder
-    private func expanded(for row: Row) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Divider()
+    private var details: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.step) {
+            Divider().opacity(0.4)
 
-            if case .pending(let item) = row {
-                if let command = item.toolInput?["command"]?.stringValue
-                    ?? item.toolInput?["file_path"]?.stringValue
-                {
-                    Text(command)
-                        .font(.system(size: 11, design: .monospaced))
-                        .textSelection(.enabled)
-                        .padding(9)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.22)))
-                }
-                // The decision lives on the card. Going somewhere else to answer
-                // is the round trip this is here to remove.
-                HStack(spacing: 8) {
-                    Button("Approve") { store.decide(row, allow: true) }
-                        .keyboardShortcut(.defaultAction)
-                    Button("Deny") { store.decide(row, allow: false) }
-                    Spacer()
-                }
+            if case .pending(let item) = row,
+               let command = item.toolInput?["command"]?.stringValue
+                   ?? item.toolInput?["file_path"]?.stringValue
+            {
+                Text(command)
+                    .font(Theme.Font.mono)
+                    .textSelection(.enabled)
+                    .padding(Theme.Space.step)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                            .fill(.black.opacity(0.2)))
             }
 
             if case .session(let s) = row {
-                if let asked = s.lastPrompt?.trimmingCharacters(in: .whitespacesAndNewlines), !asked.isEmpty {
-                    HStack(alignment: .top, spacing: 6) {
-                        Rectangle().fill(.tertiary).frame(width: 2)
+                if let asked = Format.userPrompt(s.lastPrompt) {
+                    HStack(alignment: .top, spacing: Theme.Space.step) {
+                        RoundedRectangle(cornerRadius: 1).fill(.quaternary).frame(width: 2)
                         Text(Format.oneLine(asked))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .font(Theme.Font.caption)
+                            .foregroundStyle(.tertiary)
                             .lineLimit(3)
                     }
                 }
@@ -245,45 +298,56 @@ private struct RowCard: View {
                 if let answer = store.narration ?? s.lastMessage, !answer.isEmpty {
                     ScrollView {
                         Text(markdown(answer))
-                            .font(.system(size: 11.5))
+                            .font(Theme.Font.body)
                             .textSelection(.enabled)
+                            .lineSpacing(2)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(maxHeight: 260)
+                    .scrollIndicators(.never)
+                    .frame(maxHeight: 280)
                 }
                 if !store.activity.isEmpty {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("RECENTLY")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                        ForEach(store.activity.prefix(5), id: \.self) { line in
-                            Text("· " + line)
-                                .font(.system(size: 10.5, design: .monospaced))
-                                .foregroundStyle(.tertiary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(store.activity.prefix(4), id: \.self) { line in
+                            Text(line)
+                                .font(Theme.Font.monoSmall)
+                                .foregroundStyle(.quaternary)
                                 .lineLimit(1)
                         }
                     }
                 }
             }
 
+            footer
+        }
+        .padding(.horizontal, Theme.Space.gap)
+        .padding(.bottom, Theme.Space.gap)
+        .padding(.leading, isBlocked ? Theme.Space.tight : 0)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private var footer: some View {
+        HStack(spacing: Theme.Space.step) {
             if let cwd = row.cwd {
-                HStack(spacing: 10) {
-                    Text(cwd)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                    Spacer()
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString("claude --resume \(row.sessionId)", forType: .string)
-                    } label: {
-                        Text("Copy resume")
-                    }
-                    .buttonStyle(.link)
-                    .font(.system(size: 10))
+                Text(cwd)
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.quaternary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
+            Spacer(minLength: Theme.Space.step)
+            // The way back into a session without hunting for the window it
+            // started in.
+            CopyButton(text: "claude --resume \(row.sessionId)", label: "Resume")
+            if let cwd = row.cwd {
+                Button {
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: cwd)
+                } label: {
+                    Text("Folder").font(.system(size: 9.5, weight: .medium))
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
             }
         }
     }
@@ -298,34 +362,85 @@ private struct RowCard: View {
     }
 }
 
-private struct UsageBar: View {
+private struct CopyButton: View {
+    let text: String
+    let label: String
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            withAnimation(Theme.hover) { copied = true }
+            Task {
+                try? await Task.sleep(for: .seconds(1.4))
+                withAnimation(Theme.hover) { copied = false }
+            }
+        } label: {
+            Text(copied ? "Copied" : label)
+                .font(.system(size: 9.5, weight: .medium))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(copied ? AnyShapeStyle(Color.green)
+                                : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+    }
+}
+
+// MARK: - Furniture
+
+private struct Placeholder: View {
+    let symbol: String
+    let tint: Color
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(spacing: Theme.Space.step) {
+            Image(systemName: symbol)
+                .font(.system(size: 26, weight: .light))
+                .foregroundStyle(tint.opacity(0.85))
+            Text(title)
+                .font(Theme.Font.body.weight(.medium))
+            Text(detail)
+                .font(Theme.Font.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Space.room * 2)
+        .padding(.horizontal, Theme.Space.room)
+    }
+}
+
+private struct Footer: View {
     let usage: UsageRecord
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "chart.bar")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-            // A reading that hides its own staleness is worse than no reading: it
-            // only moves while a session is talking.
+        HStack(spacing: Theme.Space.snug) {
             Text(line)
-                .font(.system(size: 10.5))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 9.5))
+                .foregroundStyle(.quaternary)
             Spacer()
+            if let cost = usage.cost?.totalCostUsd, cost > 0 {
+                Text(String(format: "$%.2f", cost))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(.quaternary)
+                    .monospacedDigit()
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.horizontal, Theme.Space.wide)
+        .padding(.vertical, Theme.Space.step)
     }
 
+    /// A reading that hides its own staleness is worse than no reading: it only
+    /// moves while a session is talking.
     private var line: String {
-        var parts: [String] = []
-        if let five = usage.rateLimits?.fiveHour?.usedPercentage { parts.append("5h \(Int(five))%") }
-        if let week = usage.rateLimits?.sevenDay?.usedPercentage { parts.append("7d \(Int(week))%") }
-        if parts.isEmpty { parts.append("no limit data") }
         let soonest = [usage.rateLimits?.fiveHour?.resetsAt, usage.rateLimits?.sevenDay?.resetsAt]
             .compactMap { $0 }.min()
+        var parts: [String] = []
         if let reset = Format.resetsIn(soonest) { parts.append(reset) }
-        parts.append(Format.age(usage.ts))
+        parts.append("read \(Format.age(usage.ts))")
+        if let model = usage.model { parts.append(model) }
         return parts.joined(separator: " · ")
     }
 }

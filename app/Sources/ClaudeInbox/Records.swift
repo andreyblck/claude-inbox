@@ -53,7 +53,10 @@ struct SessionRecord: Codable, Sendable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case sessionId, state, ts, event, cwd, permissionMode, transcriptPath
-        case endReason, lastPrompt, lastMessage, demo
+        // `phase` is written by the bridge when a session declares a step, so it
+        // has to be decoded — leaving it out silently dropped every declared step
+        // and put "working" back in rows that had something better to say.
+        case endReason, lastPrompt, lastMessage, demo, phase
     }
 }
 

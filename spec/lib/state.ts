@@ -67,8 +67,14 @@ export const LIMITS = {
   menuSection: 5,
   /** Characters of project name anywhere. */
   project: 18,
-  /** Characters of the "what it wants" phrase in a row. */
-  ask: 28,
+  /**
+   * Characters of the "what it wants" phrase for a blocked session.
+   *
+   * Written for a menu row, which was 28. A panel is wider and its cards wrap,
+   * so a decision gets enough room to be read without opening anything — and the
+   * decision is the one thing here that must never need a second click.
+   */
+  ask: 40,
   /**
    * Characters of what a running session is *about*. Longer than `ask` on
    * purpose: "run rm -rf dist" says everything in 15 characters, while a real

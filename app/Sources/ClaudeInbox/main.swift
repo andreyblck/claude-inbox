@@ -22,7 +22,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = false
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: InboxView(store: store))
+        let host = NSHostingController(rootView: InboxView(store: store))
+        // Let the panel's own material show. A hosting view paints an opaque
+        // backing by default, which sits on top of the popover's vibrancy and
+        // turns a native panel into a rectangle glued over the desktop.
+        host.view.wantsLayer = true
+        host.view.layer?.backgroundColor = .clear
+        popover.contentViewController = host
 
         store.start()
         render()
@@ -45,10 +51,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         else if running > 0 { symbol = "circle.fill" }
         else { symbol = "circle" }
 
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Claude sessions")
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Claude sessions")?
+            .withSymbolConfiguration(config)
         button.image?.isTemplate = true
         button.imagePosition = waiting > 0 ? .imageLeading : .imageOnly
-        button.title = waiting > 0 ? " \(waiting)" : ""
+        button.imageHugsTitle = true
+        // The count is the whole message when there is one, so it is set in the
+        // bar's own weight rather than left to the default label font.
+        button.attributedTitle = NSAttributedString(
+            string: waiting > 0 ? " \(waiting)" : "",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                .baselineOffset: 0.5,
+            ])
         button.toolTip =
             waiting > 0 ? "\(waiting) waiting for you"
             : answered > 0 ? "\(answered) answered"
