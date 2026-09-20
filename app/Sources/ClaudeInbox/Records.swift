@@ -161,7 +161,7 @@ enum Row: Identifiable, Sendable {
 }
 
 /// Just enough JSON to carry `tool_input` through without knowing its shape.
-enum JSONValue: Codable, Sendable {
+enum JSONValue: Codable, Sendable, Equatable {
     case string(String)
     case number(Double)
     case bool(Bool)

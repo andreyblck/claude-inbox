@@ -263,6 +263,109 @@ if CommandLine.arguments.contains("--digest") {
     exit(0)
 }
 
+// Capture is safe on its own: it writes only into this app's own store and
+// never touches the live credentials. Switching is the one that needs care, so
+// it prints what it is about to do.
+if CommandLine.arguments.contains("--capture") {
+    do {
+        let stored = try AccountStore.captureCurrent()
+        print("captured \(stored.email) (\(stored.organization ?? "—"))")
+    } catch { print("failed: \(error.localizedDescription)") }
+    exit(0)
+}
+
+if CommandLine.arguments.contains("--stored") {
+    let live = AccountStore.liveEmail()
+    for account in AccountStore.list() {
+        print("\(account.email == live ? "●" : "○") \(account.label.padding(toLength: 16, withPad: " ", startingAt: 0))"
+            + " \(account.subscription ?? "—")  captured \(Format.age(account.capturedAt.timeIntervalSince1970))")
+    }
+    if AccountStore.list().isEmpty { print("(nothing captured yet)") }
+    exit(0)
+}
+
+if let i = CommandLine.arguments.firstIndex(of: "--switch"), CommandLine.arguments.count > i + 1 {
+    let target = CommandLine.arguments[i + 1]
+    guard let account = AccountStore.list().first(where: { $0.label == target || $0.email == target })
+    else { print("no stored account named \(target)"); exit(1) }
+    do {
+        print("switching to \(try AccountStore.switchTo(account)) — verified")
+    } catch { print("failed: \(error.localizedDescription)") }
+    exit(0)
+}
+
+// The rollback is the safety net, and an unproven safety net is not one. This
+// asks for an account whose email cannot match, so verification must fail and
+// the previous credentials must come back untouched.
+if CommandLine.arguments.contains("--test-rollback") {
+    guard let real = AccountStore.list().first else { print("capture an account first"); exit(1) }
+    let before = Accounts.status(of: (NSHomeDirectory() as NSString).appendingPathComponent(".claude"))
+    print("before:   \(before.email ?? "nobody")")
+
+    var bogus = real
+    bogus.email = "nobody@example.invalid"
+    do {
+        _ = try AccountStore.switchTo(bogus)
+        print("UNEXPECTED: the switch reported success")
+    } catch {
+        print("rejected: \(error.localizedDescription)")
+    }
+
+    Accounts.invalidate()
+    let after = Accounts.status(of: (NSHomeDirectory() as NSString).appendingPathComponent(".claude"))
+    print("after:    \(after.email ?? "nobody")")
+    print(after.loggedIn && after.email == before.email
+          ? ">>> ROLLBACK HELD — still signed in as before"
+          : ">>> ROLLBACK FAILED")
+    exit(0)
+}
+
+// Puts a saved token back as Claude Code's live one, with an access list that
+// lets Claude Code read it. Needed once because an earlier version wrote the
+// item the ordinary way and narrowed it to this app.
+if let i = CommandLine.arguments.firstIndex(of: "--repair"), CommandLine.arguments.count > i + 1 {
+    let target = CommandLine.arguments[i + 1]
+    guard let account = AccountStore.list().first(where: { $0.label == target || $0.email == target }),
+          let saved = Keychain.read(service: Keychain.ownService, account: account.id)
+    else { print("no saved token for \(target)"); exit(1) }
+    let ok = Keychain.writeShared(
+        service: Keychain.claudeService, account: account.keychainAccount, data: saved.data)
+    print(ok ? "restored \(account.email)" : "could not write the item")
+    exit(ok ? 0 : 1)
+}
+
+// Puts the item back with an access list that genuinely allows every
+// application. `SecAccess` with a NULL application list did not: it left the
+// item readable only after a password prompt, so every `claude` on the machine
+// started asking for one. `security add-generic-password -A` is the documented
+// way to say "anybody", and it is what this uses.
+if let i = CommandLine.arguments.firstIndex(of: "--repair-acl"), CommandLine.arguments.count > i + 1 {
+    let target = CommandLine.arguments[i + 1]
+    guard let account = AccountStore.list().first(where: { $0.label == target || $0.email == target }),
+          let saved = Keychain.read(service: Keychain.ownService, account: account.id),
+          let secret = String(data: saved.data, encoding: .utf8)
+    else { print("no saved token for \(target)"); exit(1) }
+
+    let security = Process()
+    security.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+    security.arguments = [
+        "add-generic-password",
+        "-a", account.keychainAccount,
+        "-s", Keychain.claudeService,
+        "-w", secret,
+        "-U",  // update the existing item
+        "-A",  // any application may read it, without a prompt
+    ]
+    security.standardOutput = FileHandle.nullDevice
+    security.standardError = FileHandle.nullDevice
+    try? security.run()
+    security.waitUntilExit()
+    print(security.terminationStatus == 0
+          ? "restored \(account.email) with open access"
+          : "security exited \(security.terminationStatus)")
+    exit(security.terminationStatus == 0 ? 0 : 1)
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
