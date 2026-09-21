@@ -61,6 +61,21 @@ enum Peer {
         return socketPath(pid: pid) != nil && token(pid: pid) != nil
     }
 
+    /// Who sent this, and through what.
+    ///
+    /// It is attribution, not authority — and cannot be authority: anything
+    /// running as this user could write the same line, so a session must not
+    /// treat it as approval, and Claude Code's own preamble says exactly that.
+    /// What it does buy is the thing a session complained about out loud when it
+    /// received four bare words in a row — "подписи нет, ответить некому". A note
+    /// that says it is a person's typed words relayed from a panel is a different
+    /// object from an unsigned imperative, and can be weighed as one.
+    static func signed(_ text: String) -> String {
+        let who = NSFullUserName().trimmingCharacters(in: .whitespacesAndNewlines)
+        let from = who.isEmpty ? "the person at this Mac" : who
+        return "[Claude Inbox] Typed by \(from) in the Claude Inbox panel and relayed here.\n\n" + text
+    }
+
     static func send(_ text: String, toPID pid: Int) throws {
         guard let path = socketPath(pid: pid) else { throw Failure.noSocket }
         guard let token = token(pid: pid) else { throw Failure.noToken }
@@ -90,7 +105,7 @@ enum Peer {
         let auth: [String: Any] = ["type": "auth", "token": token]
         let message: [String: Any] = [
             "type": "user",
-            "message": ["role": "user", "content": text],
+            "message": ["role": "user", "content": signed(text)],
         ]
         for payload in [auth, message] {
             guard var data = try? JSONSerialization.data(withJSONObject: payload) else {

@@ -1111,8 +1111,8 @@ private struct Composer: View {
                     // machine should be able to speak with your authority. It is
                     // a nudge, and it is worth saying which kind.
                     Text(awaitingDecision
-                         ? "Arrives as a peer's note — steering, not your approval."
-                         : "Arrives as a message from a peer session, not as you.")
+                         ? "Signed as yours, but still a peer's note — steering, not approval."
+                         : "Arrives signed as typed by you, as a message from a peer session.")
                         .font(Theme.Font.micro)
                         .foregroundStyle(.tertiary)
                     // When it has to be you saying it, the shortest honest path is

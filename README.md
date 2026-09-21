@@ -68,7 +68,8 @@ hooks they started with and pick up the new ones on their next turn.
 | **Running** | what each session is doing right now, in the model's own words |
 
 - Rows are named after the tracker issue the session works on (`ACME-231`, from a Linear link or a bare key in your prompt), else a short generated name ("Docs search"), else the session name.
-- Notes go back into a running session. They arrive as a message from a peer session, not as you — Claude Code frames them that way so nothing outside the terminal can impersonate you.
+- Notes go back into a running session, signed with who typed them and where. Claude Code still frames them as a peer's message, on purpose: nothing outside the terminal can impersonate you, and the signature is attribution rather than authority — anything running as you could write the same line. It answers a real objection, though, which a session raised out loud after four unsigned one-word notes: *no signature, no one to reply to.*
+- **If you want a note to carry your authority**, that is a decision to make at the receiving end, knowingly: a line in your own `CLAUDE.md` telling your sessions how to read a signed note. It trades a boundary — anything on the machine running as you could then steer a session — for not walking to the terminal. The alternative that costs nothing: have sessions ask with `AskUserQuestion`, and answer that in the panel, where the answer travels on the permission channel and carries your authority by construction.
 - Tapping a banner opens the panel on that row, expanded. Approve and Deny are on the banner itself for a permission.
 - **✦** digests everything at once; **+** starts a session from the panel; right-click a row for Linear, terminal, copy, rename.
 - Native: light/dark, your accent colour, system fonts and symbols.
