@@ -8,7 +8,8 @@ that is waiting for you, in one place, answerable without finding the terminal.
 ```bash
 # App (from app/)
 swift build                        # debug build into .build/
-./package.sh                       # release build, installs into /Applications, kills the running copy
+./package.sh [--dmg]               # universal release build with bridge/ inside the bundle, installs into
+                                   # /Applications (kills the running copy); --dmg also writes build/ClaudeInbox.dmg
 .build/debug/ClaudeInbox --dump                                # what the panel would show, as text
 .build/debug/ClaudeInbox --snapshot out.png [--light] [--open N] # the panel drawn to a file
 
@@ -30,7 +31,9 @@ then `--snapshot`. The README's images were made that way.
 
 ## Structure
 
-- `bridge/` — bash hooks, `/usr/bin/jq` only. `lib.sh` holds the shared rules;
+- `bridge/` — bash hooks, `/usr/bin/jq` only; `install.sh` needs `/usr/bin/python3` (command line
+  tools). Shipped inside the app at `Contents/Resources/bridge`, and `Bridge.swift` runs it from
+  there — so a downloaded copy installs its own hooks. `lib.sh` holds the shared rules;
   `hook-session.sh` keeps the session record; `hook-permission.sh` blocks and decides.
 - `app/Sources/ClaudeInbox/` — Swift. `State.swift` is the vocabulary, `Format.swift`
   every user-visible string, `Transcript.swift` the transcript reader, `Inbox.swift` the
@@ -47,14 +50,15 @@ then `--snapshot`. The README's images were made that way.
 - Working and used daily: permission round trip, reading answers, notes back into a
   session, starting sessions, accounts, names, readings of a finished turn with one-tap
   replies, Linear links, native design in both appearances.
-- Not built: answering questions and plans from the panel (S4 in `PLAN.md`); a permission
+- Not built: answering questions and plans from the panel (S4 in `PLAN.md`) — note `AskUserQuestion`
+  does not exist in `claude -p`, so its e2e has to drive an interactive session (`expect` + a pty); a permission
   whose hook timed out shows without its command; "Go to Terminal" raises the app, not
   the tab.
 
 ## Next
 
-Open source release: the README, screenshots and license are in; the GitHub repo is still
-private. Then S4 — `AskUserQuestion` and `ExitPlanMode` both require the answer to ride
+Public at github.com/andreyblck/claude-inbox with a DMG on the releases page (unsigned: Gatekeeper
+needs Open Anyway once; a Developer ID would remove that). Then S4 — `AskUserQuestion` and `ExitPlanMode` both require the answer to ride
 in `decision.updatedInput`; see `PLAN.md` and the spike.
 
 ## Context

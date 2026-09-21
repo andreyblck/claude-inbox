@@ -185,6 +185,28 @@ final class InboxStore {
         }
     }
 
+    /// Put the hooks in, from the copy inside the app. Nothing reports in until
+    /// this has run once, and the panel says so rather than looking quiet.
+    func installBridge(uninstall: Bool = false) {
+        guard !working else { return }
+        working = true
+        problem = nil
+        Task.detached(priority: .userInitiated) {
+            do {
+                _ = try Bridge.run(uninstall: uninstall)
+                await MainActor.run {
+                    self.working = false
+                    self.reload()
+                }
+            } catch {
+                await MainActor.run {
+                    self.problem = error.localizedDescription
+                    self.working = false
+                }
+            }
+        }
+    }
+
     func clearDigest() {
         digest = nil
         problem = nil

@@ -13,8 +13,11 @@ APP="build/$NAME.app"
 
 # Only the bundle path goes to stdout: this script is meant to be substituted
 # into a variable, and a compiler log in that variable is a path that is not one.
-swift build -c "$CONFIG" >&2
-BIN=$(swift build -c "$CONFIG" --show-bin-path 2>/dev/null)/"$NAME"
+# One binary for both kinds of Mac: a disk image that only opens on Apple
+# silicon is a support thread waiting to happen.
+ARCHES=(--arch arm64 --arch x86_64)
+swift build -c "$CONFIG" "${ARCHES[@]}" >&2
+BIN=$(swift build -c "$CONFIG" "${ARCHES[@]}" --show-bin-path 2>/dev/null)/"$NAME"
 
 # The icon is the picture on every notification banner, so it is part of the
 # build rather than something remembered later.
@@ -23,6 +26,10 @@ BIN=$(swift build -c "$CONFIG" --show-bin-path 2>/dev/null)/"$NAME"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$NAME"
+# The hooks travel with the app, so a downloaded copy can install them itself.
+mkdir -p "$APP/Contents/Resources/bridge"
+for f in install.sh lib.sh hook-permission.sh hook-session.sh statusline.sh; do cp "../bridge/$f" "$APP/Contents/Resources/bridge/"; done
+chmod +x "$APP/Contents/Resources/bridge/"*.sh
 [ -f build/$NAME.icns ] && cp "build/$NAME.icns" "$APP/Contents/Resources/$NAME.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST

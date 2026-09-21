@@ -92,12 +92,17 @@ struct InboxView: View {
 
             Group {
                 if !store.bridgeInstalled {
+                    // A quiet machine and a disconnected one look identical to a
+                    // reader. Say which one this is — and, from a downloaded
+                    // copy, fix it with one button rather than one script.
                     Placeholder(
                         symbol: "powerplug",
-                        title: "The Bridge Is Not Installed",
-                        // A quiet machine and a disconnected one look identical
-                        // to a reader. Say which one this is.
-                        detail: "Run bridge/install.sh once. Until then nothing reports in.")
+                        title: "Connect to Claude Code",
+                        detail: Bridge.bundledInstaller == nil
+                            ? "Run bridge/install.sh from the clone once. Until then nothing reports in."
+                            : "Claude Inbox adds a few hooks to Claude Code so every session on this Mac reports in. Your settings.json is backed up first.",
+                        action: Bridge.bundledInstaller == nil ? nil
+                            : (store.working ? "Installing…" : "Install Bridge", { store.installBridge() }))
                 } else if !store.loadedOnce {
                     // For the instant before the first read lands, "nothing
                     // needs you" is a claim nobody has checked.
@@ -395,6 +400,15 @@ private struct Header: View {
             // Quit lives where a Mac app keeps it: in a menu, not on a power
             // button nobody expects to find in a panel.
             Menu {
+                if Bridge.bundledInstaller != nil {
+                    if store.bridgeInstalled {
+                        Button("Reinstall Bridge") { store.installBridge() }
+                        Button("Uninstall Bridge…") { confirmUninstall() }
+                    } else {
+                        Button("Install Bridge") { store.installBridge() }
+                    }
+                    Divider()
+                }
                 Button("Quit Claude Inbox") { NSApplication.shared.terminate(nil) }
                     .keyboardShortcut("q")
             } label: {
@@ -409,6 +423,15 @@ private struct Header: View {
         .padding(.horizontal, Theme.Space.wide)
         .padding(.top, Theme.Space.wide)
         .padding(.bottom, Theme.Space.gap)
+    }
+
+    private func confirmUninstall() {
+        let alert = NSAlert()
+        alert.messageText = "Uninstall the bridge?"
+        alert.informativeText = "The hooks come out of Claude Code's settings and your status line goes back. Sessions stop reporting in; the app stays."
+        alert.addButton(withTitle: "Uninstall")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { store.installBridge(uninstall: true) }
     }
 
     /// The one line that answers "what is the state of everything" without
@@ -1043,12 +1066,20 @@ private struct Placeholder: View {
     let symbol: String
     let title: String
     let detail: String
+    var action: (String, () -> Void)? = nil
 
     var body: some View {
         ContentUnavailableView {
             Label(title, systemImage: symbol)
         } description: {
             if !detail.isEmpty { Text(detail) }
+        } actions: {
+            if let (label, act) = action {
+                Button(label, action: act)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .padding(.top, Theme.Space.tight)
+            }
         }
         .padding(.vertical, Theme.Space.room)
     }

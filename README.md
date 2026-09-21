@@ -47,30 +47,47 @@ SF Symbols, the fonts and spacing of every other panel on the Mac.
 
 ## Install
 
-Needs macOS 15 or later, the Xcode command line tools, and Claude Code signed in.
+Needs macOS 15 or later and Claude Code signed in. Two minutes, no terminal.
+
+**1. Download and open.** Get `ClaudeInbox.dmg` from the
+[latest release](https://github.com/andreyblck/claude-inbox/releases/latest),
+open it, and drag Claude Inbox into Applications.
+
+**2. Open it once past Gatekeeper.** The app is open source and not signed with
+an Apple certificate, so the first launch shows *"Apple could not verify
+ClaudeInbox is free of malware"*. Click Done, then open **System Settings →
+Privacy & Security**, scroll down to the line about ClaudeInbox, and click
+**Open Anyway**. Once. (From a terminal, the same thing is
+`xattr -d com.apple.quarantine /Applications/ClaudeInbox.app`.)
+
+**3. Click Install Bridge.** A new icon appears in the menu bar. Click it, or
+press **⌥Space**:
+
+<p align="center">
+  <img src="docs/screenshots/connect-dark.png" width="440" alt="The first screen: Connect to Claude Code, with an Install Bridge button">
+</p>
+
+That adds a few hooks to Claude Code's `~/.claude/settings.json` (backed up
+first) so every session on this Mac reports in, and wraps your status line if
+you have one. Allow notifications when asked — a banner is how a session that
+needs you reaches you when the panel is closed. Sessions already running appear
+on their next turn.
+
+To take it out again: **… → Uninstall Bridge**, then drag the app to the Trash.
+
+### From source
 
 ```bash
 git clone https://github.com/andreyblck/claude-inbox.git
 cd claude-inbox
-./bridge/install.sh          # hooks + status line into ~/.claude, backs up settings.json
-./app/package.sh             # builds the app and installs it into /Applications
-open /Applications/ClaudeInbox.app
+./app/package.sh             # builds a universal binary and installs it into /Applications
+open /Applications/ClaudeInbox.app   # then Install Bridge, as above
 ```
 
-Keep the clone where it is: the hooks run from `bridge/` inside it. The app is
-unsigned, so a copy built on another Mac opens with right-click → Open the first
-time; one you built yourself just opens.
-
-The panel is on **⌥Space**, or a click on the menu bar item. Allow notifications
-when asked — a banner is how a session that needs you reaches you when the panel
-is closed. Sessions that were already running when the bridge went in appear on
-their next turn.
-
-To take it out again:
-
-```bash
-./bridge/install.sh --uninstall   # hooks out, your status line back
-```
+Needs the Xcode command line tools (you have them if you have `git`). The
+hooks travel inside the app bundle, so a built app installs them the same way a
+downloaded one does; `./bridge/install.sh` from the clone works too and points
+the hooks at the clone instead.
 
 ## Using it
 
@@ -174,7 +191,8 @@ The Swift port has no test target of its own. `ClaudeInbox --dump` prints what
 the panel would show, so the port can be diffed against `spec/` on the same data;
 `ClaudeInbox --snapshot out.png [--light] [--open N]` draws the panel to a file,
 which is how the screenshots above were made — from `bridge/demo.sh`, on an inbox
-of invented sessions.
+of invented sessions. `./app/package.sh --dmg` builds the disk image on the
+releases page.
 
 ## Status
 

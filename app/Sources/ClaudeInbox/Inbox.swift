@@ -28,7 +28,12 @@ enum Inbox {
         let dirs = listed.split(separator: "\n")
             .map { ($0.trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath }
             .filter { !$0.isEmpty }
-        return dirs.isEmpty ? [(NSHomeDirectory() as NSString).appendingPathComponent(".claude")] : dirs
+        if !dirs.isEmpty { return dirs }
+        // Before the bridge has recorded anything, the same default the bridge
+        // itself uses — an account under CLAUDE_CONFIG_DIR is still an account.
+        let configured = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"] ?? ""
+        return [configured.isEmpty ? (NSHomeDirectory() as NSString).appendingPathComponent(".claude")
+                                   : (configured as NSString).expandingTildeInPath]
     }
 
     /// Has the bridge ever been installed? An empty inbox and an absent one look
