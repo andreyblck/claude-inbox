@@ -84,7 +84,7 @@ hooks they started with and pick up the new ones on their next turn.
 | **⌥Space** | open / close |
 | type | filter by issue, name, or text |
 | **↑ ↓ ↵** | move, open |
-| **⌘↵ / ⌘⌫** | approve / deny the focused permission |
+| **⌘↵ / ⌘⌫** | approve / deny the focused permission — a question is answered by its options, never by ⌘↵ |
 | **⌘1…9** | open the n-th waiting row |
 | **⌘L** | open the issue in Linear |
 | **⌘T** | bring the session's terminal to the front |
@@ -143,7 +143,7 @@ bridge/demo.sh [--clear]                               # invented sessions (the 
 
 - Unsigned: Gatekeeper's Open Anyway once per update. A Developer ID would remove it; nothing else changes.
 - `install.sh` uses `/usr/bin/python3`, i.e. the Xcode command line tools (present if you have `git`).
-- Questions (`AskUserQuestion`) and plans (`ExitPlanMode`) are shown; answering them from the panel is next.
+- Answering a question from the panel is covered by the spec and by `bridge/selftest.sh`, but not end to end: `AskUserQuestion` only exists in an interactive session, so `claude -p` cannot raise one and the TUI does not take pty input reliably enough to assert on.
 - ⌘T raises the terminal app, not the tab — Warp and most others give no way to ask for one.
 - Verified against Claude Code 2.1.278; hook payloads recorded in `spikes/README.md`.
 
