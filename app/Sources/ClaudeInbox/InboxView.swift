@@ -763,6 +763,23 @@ private struct RowCard: View {
                 .buttonStyle(.borderedProminent)
             Button("Deny") { store.decide(row, allow: false) }
                 .buttonStyle(.bordered)
+            // Answering the same question twelve times is the thing worth fixing,
+            // and Claude Code already says what the broader answer would be. A
+            // menu rather than three more buttons: this is the rarer press, and
+            // it is the one you should read before making.
+            if case .pending(let item) = row {
+                let grants = Format.grants(item)
+                if !grants.isEmpty {
+                    Menu("Allow and…") {
+                        ForEach(grants) { grant in
+                            Button(grant.label) { store.decide(row, allow: true, grant: grant) }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("Approve, and let Claude Code stop asking")
+                }
+            }
             Spacer()
         }
         .controlSize(.small)

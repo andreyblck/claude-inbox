@@ -242,6 +242,8 @@ if CommandLine.arguments.contains("--dump") {
         return .session(s)
     }
     rows.sort(by: Inbox.bySeverity)
+    // Loud on purpose: the whole point of --dump is to catch what the panel hides.
+    if Inbox.unreadable > 0 { print("\n\(Inbox.unreadable) record(s) the decoder refused") }
     var group: StateGroup?
     for row in rows {
         if row.state.group != group {

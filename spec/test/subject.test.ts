@@ -12,6 +12,8 @@ import { readCommand, readIssue, readSessionSummary, readTurnNarration } from ".
 import {
   bySeverity,
   cleanLabel,
+  grantsOf,
+  shortPath,
   headlineOf,
   issueOf,
   labelOf,
@@ -24,6 +26,7 @@ import {
   userPrompt,
   subjectOf,
   type InboxState,
+  type PendingItem,
   type SessionRecord,
 } from "../lib/state";
 
@@ -41,11 +44,76 @@ describe("the step a session declared", () => {
   it("makes a hyphenated command readable", () => {
     assert.equal(phaseOf("/code-review the diff"), "code review");
   });
+  it("ignores Claude Code's own commands: they are not steps of work", () => {
+    // /model is something you type mid-task. Before the step was kept across
+    // turns it showed once and went; kept, it sat on the row for good.
+    assert.equal(phaseOf("/model"), undefined);
+    assert.equal(phaseOf("/compact"), undefined);
+    assert.equal(phaseOf("/clear"), undefined);
+    assert.equal(phaseOf("/morgan:track fix it"), "track");
+    assert.equal(phaseOf("/sky-verify-mine"), "sky verify mine");
+  });
   it("says nothing when nothing was declared", () => {
     // Inventing a step from prose would be a guess wearing a label's clothes.
     assert.equal(phaseOf("почини иконку в меню баре"), undefined);
     assert.equal(phaseOf(""), undefined);
     assert.equal(phaseOf(undefined), undefined);
+  });
+});
+
+describe("a path a person can read", () => {
+  it("collapses home and the system temp", () => {
+    assert.equal(shortPath("/Users/me/work/acme", "/Users/me"), "~/work/acme");
+    assert.equal(shortPath("/private/var/folders/sz/abc/T/tmp.X9/project"), "tmp/tmp.X9/project");
+    assert.equal(shortPath("/opt/src", "/Users/me"), "/opt/src");
+  });
+});
+
+describe("a grant, offered by Claude Code and handed straight back", () => {
+  // Claude Code sends these ready-made on the request. A malformed entry makes it
+  // drop the whole array with a warning nobody sees, so we never build one: we
+  // only recognise, label and echo.
+  const pending = (suggestions: unknown[]): PendingItem => ({
+    req: "r", kind: "permission", state: "blocked.permission", ts: 0, session_id: "s",
+    tool_name: "Bash", permission_suggestions: suggestions,
+  });
+
+  it("says what each one actually does, and how far it reaches", () => {
+    const grants = grantsOf(pending([
+      { type: "setMode", mode: "acceptEdits", destination: "session" },
+      { type: "addDirectories", directories: [`${process.env.HOME}/work/acme`], destination: "userSettings" },
+      { type: "addRules", rules: [{ toolName: "Bash" }], behavior: "allow", destination: "session" },
+    ]));
+    assert.deepEqual(grants.map((g) => g.label), [
+      "Accept edits for this session",
+      "Always trust ~/work/acme",
+      "Allow Bash for this session",
+    ]);
+  });
+
+  it("hands the suggestion back byte for byte", () => {
+    const one = { type: "setMode", mode: "acceptEdits", destination: "session" };
+    assert.deepEqual(grantsOf(pending([one]))[0].suggestion, one);
+  });
+
+  it("drops what it cannot vouch for, rather than risk the whole array", () => {
+    assert.deepEqual(grantsOf(pending([
+      { type: "addDirectories", destination: "session" },              // no directories
+      { type: "addRules", rules: [{ toolName: "Bash" }] },             // no behavior
+      { type: "setMode", mode: "acceptEdits", destination: "wat" },    // unknown destination
+      { type: "teleport", destination: "session" },                    // unknown type
+      "not an object",
+      { type: "removeDirectories", directories: ["/x"], destination: "session" },  // taking away is not a shortcut
+    ])), []);
+    assert.deepEqual(grantsOf(pending([])), []);
+    assert.deepEqual(grantsOf({ req: "r", kind: "permission", state: "blocked.permission", ts: 0, session_id: "s" }), []);
+  });
+
+  it("offers at most three, because a card is not a settings pane", () => {
+    const many = Array.from({ length: 6 }, (_, i) => ({
+      type: "addDirectories", directories: [`${process.env.HOME}/work/d${i}`], destination: "session",
+    }));
+    assert.equal(grantsOf(pending(many)).length, 3);
   });
 });
 

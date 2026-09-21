@@ -58,6 +58,12 @@ sess() { # id, state, cwd, issue, label, phase, ago, last prompt, last message, 
 }
 
 pend demo01 Bash '{"command":"npm run db:migrate -- --env staging","description":"Apply the pending migrations to staging"}' "$HOME/work/acme-api" 140
+# Claude Code sends these on a real request; the panel offers them back as
+# "Allow and…", so the demo has to carry them or that button is never seen.
+"$JQ" --argjson s '[{"type":"setMode","mode":"acceptEdits","destination":"session"},
+                    {"type":"addDirectories","directories":["'"$HOME"'/work/acme-api"],"destination":"userSettings"}]' \
+  '.permission_suggestions = $s' "$INBOX_DIR/pending/demo01.json" > "$INBOX_DIR/pending/demo01.tmp" \
+  && mv "$INBOX_DIR/pending/demo01.tmp" "$INBOX_DIR/pending/demo01.json"
 
 sess demo-s1 idle "$HOME/work/acme-api" "ACME-231" "" "track" 660 \
   "/track https://linear.app/acme/issue/ACME-231/legacy-rate-column is this done? finish it if not" \

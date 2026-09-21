@@ -83,6 +83,49 @@ struct SessionRecord: Codable, Sendable, Identifiable {
         // judged, and photographed, without a model in the loop.
         case label, needsYou, line, replies
     }
+
+    /// Written by hand, and it has to stay that way.
+    ///
+    /// The synthesized decoder ignores a property's default value: a non-optional
+    /// with a default still makes the key *required*, and one missing key throws
+    /// out the whole record. `readJSONDir` swallows that with `try?`, so adding
+    /// `needsYou` to the keys silently dropped every record the bridge had ever
+    /// written — and the panel looked fine, because rows were being rebuilt from
+    /// the live registry and the transcript. Only the demo rows, which carry every
+    /// field, still decoded.
+    ///
+    /// So: `decodeIfPresent` for everything. A record is written by a shell script
+    /// from a payload we do not control, and by an older bridge than this build —
+    /// a missing field must degrade a row, never drop it.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId = try c.decode(String.self, forKey: .sessionId)
+        state = try c.decodeIfPresent(InboxState.self, forKey: .state) ?? .working
+        ts = try c.decodeIfPresent(Double.self, forKey: .ts) ?? 0
+        event = try c.decodeIfPresent(String.self, forKey: .event)
+        cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
+        permissionMode = try c.decodeIfPresent(String.self, forKey: .permissionMode)
+        transcriptPath = try c.decodeIfPresent(String.self, forKey: .transcriptPath)
+        endReason = try c.decodeIfPresent(String.self, forKey: .endReason)
+        lastPrompt = try c.decodeIfPresent(String.self, forKey: .lastPrompt)
+        lastMessage = try c.decodeIfPresent(String.self, forKey: .lastMessage)
+        issue = try c.decodeIfPresent(String.self, forKey: .issue)
+        notificationType = try c.decodeIfPresent(String.self, forKey: .notificationType)
+        demo = try c.decodeIfPresent(Bool.self, forKey: .demo)
+        phase = try c.decodeIfPresent(String.self, forKey: .phase)
+        waitingFor = try c.decodeIfPresent(String.self, forKey: .waitingFor)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        needsYou = try c.decodeIfPresent(Bool.self, forKey: .needsYou) ?? false
+        line = try c.decodeIfPresent(String.self, forKey: .line)
+        replies = try c.decodeIfPresent([String].self, forKey: .replies) ?? []
+    }
+
+    init(sessionId: String, state: InboxState, ts: Double) {
+        self.sessionId = sessionId
+        self.state = state
+        self.ts = ts
+    }
+
 }
 
 struct UsageRecord: Codable, Sendable, Identifiable {
@@ -228,5 +271,10 @@ enum JSONValue: Codable, Sendable, Equatable {
     var count: Int {
         if case .array(let a) = self { return a.count }
         return 0
+    }
+
+    var arrayValue: [JSONValue]? {
+        if case .array(let a) = self { return a }
+        return nil
     }
 }

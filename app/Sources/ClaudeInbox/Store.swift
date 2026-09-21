@@ -49,6 +49,7 @@ final class InboxStore {
     func reload() {
         Task.detached(priority: .userInitiated) {
             Inbox.touchHeartbeat()
+            Inbox.resetUnreadable()
             let pending = Inbox.readPending()
             let hooked = Inbox.readSessions()
             let live = Inbox.readLiveSessions()
@@ -239,13 +240,14 @@ final class InboxStore {
         reload()
     }
 
-    func decide(_ row: Row, allow: Bool) {
+    func decide(_ row: Row, allow: Bool, grant: Format.Grant? = nil) {
         guard case .pending(let item) = row else { return }
         let decision = allow ? "allow" : "deny"
         Inbox.writeVerdict(
             req: item.req,
             decision: decision,
-            reason: allow ? "Approved in Claude Inbox" : "Denied in Claude Inbox")
+            reason: allow ? "Approved in Claude Inbox" : "Denied in Claude Inbox",
+            grants: grant.map { [$0.suggestion] } ?? [])
         // A request answered here should not leave a banner behind offering to
         // answer it again.
         Notifier.shared.withdraw(item.req)

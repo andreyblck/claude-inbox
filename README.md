@@ -40,7 +40,7 @@ From source: `git clone https://github.com/andreyblck/claude-inbox.git && cd cla
 
 | Section | What lands there |
 |---|---|
-| **Waiting for You** | permission requests (Approve / Deny on the row and on the banner); turns that ended by asking you something, with the ask in one line and one-tap replies |
+| **Waiting for You** | permission requests — Approve / Deny on the row and on the banner, plus **Allow and…** for the broader grant Claude Code itself offers (trust this directory, accept edits), which answers this request and the next dozen; turns that ended by asking you something, with the ask in one line and one-tap replies |
 | **Answered** | finished turns, unread ones with a blue dot; open a row for the whole answer as rendered markdown |
 | **Running** | what each session is doing right now, in the model's own words |
 
@@ -104,22 +104,21 @@ Waiting for CI, agents or timers is NO: the session wakes itself. Answers come i
 ```bash
 cd app && swift build                                  # debug build
 ./app/package.sh [--dmg]                               # universal release → /Applications [+ disk image]
-cd spec && npm install && npm test                     # the rules — 91 cases
+cd spec && npm install && npm test                     # the rules — 97 cases
 bridge/selftest.sh                                     # hooks against a throwaway inbox
 bridge/install-test.sh                                 # install.sh against throwaway config dirs
-bridge/e2e.sh [--deny|--silent]                        # a REAL `claude -p` session blocks; a verdict file decides it
+bridge/e2e.sh [--deny|--silent|--grant]                # a REAL `claude -p` session blocks; a verdict file decides it
 app/.build/debug/ClaudeInbox --dump                    # what the panel would show, as text
 app/.build/debug/ClaudeInbox --snapshot out.png [--light] [--open N]   # the panel drawn to a file
 bridge/demo.sh [--clear]                               # invented sessions (the screenshots above)
 ```
 
-`e2e.sh` is the test that matters: it drives real Claude Code. A hook's output that fails Claude Code's schema is dropped *quietly* and looks exactly like a timeout — the first version passed its own tests for a day and could not approve anything. The Swift port has no test target; `--dump` diffs it against `spec/` on the same data.
+`e2e.sh` is the test that matters: it drives real Claude Code. Output that fails Claude Code's schema is dropped *quietly* — a bad decision shape looks exactly like a timeout, and a malformed grant is ignored with a warning nobody sees. `--grant` is the only test that can catch the second: it asserts a second tool call is never asked about. The Swift port has no test target; `--dump` diffs it against `spec/` on the same data and prints how many records the decoder refused, because a silent drop once made a broken build look like a quiet machine.
 
 ## Limits
 
 - Unsigned: Gatekeeper's Open Anyway once per update. A Developer ID would remove it; nothing else changes.
 - `install.sh` uses `/usr/bin/python3`, i.e. the Xcode command line tools (present if you have `git`).
-- A permission whose hook timed out shows as "needs your permission" without the command.
 - Questions (`AskUserQuestion`) and plans (`ExitPlanMode`) are shown; answering them from the panel is next.
 - ⌘T raises the terminal app, not the tab — Warp and most others give no way to ask for one.
 - Verified against Claude Code 2.1.278; hook payloads recorded in `spikes/README.md`.

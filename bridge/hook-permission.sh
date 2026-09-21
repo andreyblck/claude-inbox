@@ -59,16 +59,26 @@ case "$decision" in
 esac
 reason=$(printf '%s' "$verdict" | "$JQ" -r '.reason // "Answered in Claude Inbox"' 2>/dev/null)
 
+# A broader grant the person pressed: "trust this directory", "accept edits".
+# These are Claude Code's own `permission_suggestions`, handed straight back — we
+# never build one. A malformed entry makes Claude Code drop the whole array and
+# log "malformed updatedPermissions ignored" at warn level, which nobody sees, so
+# anything that is not a JSON array is left out entirely rather than guessed at.
+grants=$(printf '%s' "$verdict" | "$JQ" -c 'select(.updated_permissions | type == "array") | .updated_permissions' 2>/dev/null)
+case "$grants" in '['*) ;; *) grants="" ;; esac
+
 # The contract, verbatim from the binary's own validator:
 #   {behavior: "allow", updatedInput?: object} | {behavior: "deny", message: string}
 # `decision` is an OBJECT. A string here fails schema validation, the decision is
 # dropped, the schema error is surfaced into the session, and the terminal prompts
 # anyway — which looks exactly like the hook timing out. Get this shape wrong and
 # nothing tells you.
-"$JQ" -n --arg d "$decision" --arg r "$reason" '{
+"$JQ" -n --arg d "$decision" --arg r "$reason" --argjson g "${grants:-null}" '{
   hookSpecificOutput: {
     hookEventName: "PermissionRequest",
-    decision: (if $d == "allow" then {behavior: "allow"} else {behavior: "deny", message: $r} end)
+    decision: (if $d == "allow"
+               then ({behavior: "allow"} + (if $g == null then {} else {updatedPermissions: $g} end))
+               else {behavior: "deny", message: $r} end)
   }
 }' 2>/dev/null
 exit 0

@@ -36,6 +36,30 @@ check "behavior"      "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutpu
 check "decision type" "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision | type')" "object"
 check "allow is bare" "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision | keys | join(",")')" "behavior"
 
+echo "1a. an allow can carry the broader grant the person pressed"
+date +%s > "$CLAUDE_INBOX_DIR/heartbeat"
+( sleep 0.6
+  for f in "$CLAUDE_INBOX_DIR"/pending/*.json; do
+    [ -f "$f" ] || continue
+    /usr/bin/jq -n '{decision:"allow", updated_permissions:[{type:"setMode",mode:"acceptEdits",destination:"session"}]}' \
+      > "$CLAUDE_INBOX_DIR/verdicts/$(basename "$f" .json).json"
+  done ) &
+out=$(printf '%s' "$PAYLOAD" | CLAUDE_INBOX_PERMISSION_TIMEOUT=8 ./hook-permission.sh)
+check "grant rides along" "$(printf '%s' "$out" | /usr/bin/jq -c '.hookSpecificOutput.decision.updatedPermissions')" \
+  '[{"type":"setMode","mode":"acceptEdits","destination":"session"}]'
+check "behavior intact"   "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision.behavior')" "allow"
+# Not an array is not a grant. Claude Code drops a malformed array silently, so
+# the hook must leave the key out rather than pass rubbish through.
+date +%s > "$CLAUDE_INBOX_DIR/heartbeat"
+( sleep 0.6
+  for f in "$CLAUDE_INBOX_DIR"/pending/*.json; do
+    [ -f "$f" ] || continue
+    /usr/bin/jq -n '{decision:"allow", updated_permissions:"acceptEdits"}' \
+      > "$CLAUDE_INBOX_DIR/verdicts/$(basename "$f" .json).json"
+  done ) &
+out=$(printf '%s' "$PAYLOAD" | CLAUDE_INBOX_PERMISSION_TIMEOUT=8 ./hook-permission.sh)
+check "rubbish left out" "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision | keys | join(",")')" "behavior"
+
 echo "1b. deny carries the message the model is told"
 ( for _ in $(seq 1 100); do
     f=$(ls "$CLAUDE_INBOX_DIR/pending"/*.json 2>/dev/null | head -1) || true

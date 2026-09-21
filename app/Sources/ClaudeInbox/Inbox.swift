@@ -49,16 +49,28 @@ enum Inbox {
         return d
     }()
 
+    /// Files the decoder refused, since the last read. A record we cannot read is
+    /// a session the panel cannot show, and `try?` makes that invisible — which is
+    /// how a decoding regression shipped and still looked like a working panel.
+    nonisolated(unsafe) private(set) static var unreadable = 0
+
     private static func readJSONDir<T: Decodable>(_ dir: String, as type: T.Type) -> [T] {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return [] }
         return names.compactMap { name in
             guard name.hasSuffix(".json") else { return nil }
             let file = (dir as NSString).appendingPathComponent(name)
             guard let data = FileManager.default.contents(atPath: file) else { return nil }
-            // A half-written or hand-edited file is skipped, never fatal.
-            return try? decoder.decode(T.self, from: data)
+            // A half-written or hand-edited file is skipped, never fatal — but
+            // counted, so a decoder that rejects everything cannot pass for a
+            // quiet machine.
+            do { return try decoder.decode(T.self, from: data) } catch {
+                unreadable += 1
+                return nil
+            }
         }
     }
+
+    static func resetUnreadable() { unreadable = 0 }
 
     static func readPending() -> [PendingItem] { readJSONDir(path("pending"), as: PendingItem.self) }
     static func readSessions() -> [SessionRecord] { readJSONDir(path("sessions"), as: SessionRecord.self) }
@@ -247,13 +259,16 @@ enum Inbox {
     // MARK: - Writing
 
     /// Atomic, because a hook is polling for this exact file in a tight loop.
-    static func writeVerdict(req: String, decision: String, reason: String) {
+    static func writeVerdict(req: String, decision: String, reason: String, grants: [JSONValue] = []) {
         let dir = path("verdicts")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let dest = (dir as NSString).appendingPathComponent("\(req).json")
         let tmp = dest + ".\(ProcessInfo.processInfo.processIdentifier).tmp"
-        let payload = ["decision": decision, "reason": reason]
-        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        var payload: [String: JSONValue] = ["decision": .string(decision), "reason": .string(reason)]
+        // Only ever what Claude Code itself suggested. Omitted entirely when
+        // empty: a malformed array is dropped whole, and silently.
+        if !grants.isEmpty { payload["updated_permissions"] = .array(grants) }
+        guard let data = try? JSONEncoder().encode(payload) else { return }
         guard (try? data.write(to: URL(fileURLWithPath: tmp))) != nil else { return }
         try? FileManager.default.moveItem(atPath: tmp, toPath: dest)
     }

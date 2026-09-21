@@ -5,6 +5,7 @@
 #   ./e2e.sh            verdict "allow"  -> the tool must run
 #   ./e2e.sh --deny     verdict "deny"   -> the tool must not run
 #   ./e2e.sh --silent   no verdict       -> hook times out, session survives
+#   ./e2e.sh --grant    allow + a rule    -> the rule lands, the next call is not asked
 #
 # selftest.sh proves the hook's own logic against a synthetic payload. This proves
 # the thing selftest cannot: that Claude Code itself fires the hook and honours the
@@ -19,6 +20,10 @@ MODE=allow
 case "${1:-}" in
   --deny) MODE=deny ;;
   --silent) MODE=silent ;;
+  # The only test that can catch a grant being dropped. Claude Code ignores a
+  # malformed `updatedPermissions` with a warning nobody sees, so "it looked
+  # right" proves nothing — only a second tool call running unasked does.
+  --grant) MODE=grant ;;
   "") ;;
   *) echo "unknown option: $1" >&2; exit 2 ;;
 esac
@@ -47,10 +52,20 @@ trap cleanup EXIT
 captured="$ROOT/captured.json"
 ( while :; do date +%s > "$CLAUDE_INBOX_DIR/heartbeat"; sleep 2; done ) & heart=$!
 if [ "$MODE" != silent ]; then
-  ( for _ in $(seq 1 600); do
+  ( asked=0
+    for _ in $(seq 1 600); do
       for f in "$CLAUDE_INBOX_DIR"/pending/*.json; do
         [ -f "$f" ] || continue
         cp "$f" "$captured" 2>/dev/null
+        if [ "$MODE" = grant ]; then
+          # Answer the FIRST request with a rule that should cover the rest, then
+          # keep watching: any second request means the rule never landed.
+          /usr/bin/jq -n '{decision:"allow", reason:"e2e",
+            updated_permissions:[{type:"addRules", rules:[{toolName:"Bash"}], behavior:"allow", destination:"session"}]}' \
+            > "$CLAUDE_INBOX_DIR/verdicts/$(basename "$f" .json).json"
+          asked=$((asked + 1)); printf '%s' "$asked" > "$ROOT/asked"
+          continue
+        fi
         /usr/bin/jq -n --arg d "$MODE" '{decision:$d, reason:"e2e"}' \
           > "$CLAUDE_INBOX_DIR/verdicts/$(basename "$f" .json).json"
         exit 0
@@ -61,13 +76,18 @@ if [ "$MODE" != silent ]; then
 fi
 
 echo "mode: $MODE   inbox: $CLAUDE_INBOX_DIR"
+PROMPT="Run exactly this shell command and nothing else: touch it-ran.txt"
+SECOND="$PROJECT/it-ran-twice.txt"
+if [ "$MODE" = grant ]; then
+  PROMPT="Run these two shell commands one at a time, nothing else: first 'touch it-ran.txt', then 'touch it-ran-twice.txt'."
+fi
 out=$(cd "$PROJECT" && claude -p \
   --model "$MODEL" \
   --permission-mode manual \
   --permission-prompts none \
   --output-format json \
   --max-turns 4 \
-  "Run exactly this shell command and nothing else: touch it-ran.txt" 2>&1)
+  "$PROMPT" 2>&1)
 rc=$?
 [ -n "${watcher:-}" ] && wait "$watcher" 2>/dev/null
 
@@ -94,6 +114,13 @@ case "$MODE" in
   deny)
     check "hook fired (pending captured)" "$([ -f "$captured" ] && echo yes || echo no)" "yes"
     check "tool blocked after deny" "$ran" "no"
+    ;;
+  grant)
+    ran2=no; [ -f "$SECOND" ] && ran2=yes
+    check "first tool ran"          "$ran" "yes"
+    check "second tool ran too"     "$ran2" "yes"
+    # The whole point: one request, not one per call.
+    check "asked once, then never"  "$(cat "$ROOT/asked" 2>/dev/null || echo 0)" "1"
     ;;
   silent)
     check "tool blocked with no verdict" "$ran" "no"

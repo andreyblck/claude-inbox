@@ -422,6 +422,94 @@ export function cleanLabel(raw?: string | null): string | undefined {
   return text;
 }
 
+/**
+ * A path a person can read.
+ *
+ * `/private/var/folders/sz/n9zh8s2x…/T/tmp.3nRfVq8Ruf` is four lines of noise and
+ * one useful word. Home becomes `~`, the system temp becomes `tmp`, and what is
+ * left is the part someone would have said out loud.
+ */
+export function shortPath(path: string, home = process.env.HOME ?? ""): string {
+  let text = path.replace(/\/var\/folders\/[^/]+\/[^/]+\/T\//, "tmp/__KEEP__").replace(/^.*tmp\/__KEEP__/, "tmp/");
+  text = text.replace(/^\/private/, "");
+  if (home && text.startsWith(home)) text = "~" + text.slice(home.length);
+  return text;
+}
+
+/**
+ * Claude Code's own slash commands, read out of the 2.1.278 binary rather than
+ * remembered — regenerate from the command/category map inside it.
+ *
+ * `/model` is something a person types in the middle of a task, not a step of
+ * work. It mattered once the step began to be kept across turns: shown once it
+ * was noise, kept it sat on the row for the rest of the session.
+ */
+const BUILT_IN_COMMANDS = new Set(
+  `add-dir advisor agents ant-trace artifacts auto-mode-setup autocompact autofix-pr autopilot
+   background branch brief btw bug bugfix cd channel chrome claim-credit clear cloud-plugins color
+   compact config context copy daemon dashboard debug-tool-call design-consent design-login
+   design-revoke desktop diff docs effort env exit experiments export extra-usage fast feedback
+   focus fork goal heapdump help hooks ide import input-debug install-github-app install-slack-app
+   investigate issue keybindings limit-reset list-agents login logout loops low-priority mcp memory
+   mobile mock-limits model oauth-refresh onboarding output-style passes pause-memory perf-issue
+   permissions plan plugin plugin-types powerup privacy-settings pro-trial-expired radio
+   rate-limit-options recap release-notes reload-plugins reload-skills remote-control remote-env
+   remote-workflow rename render-debug reset-limits resume rewind sandbox schedule scroll-speed
+   session settings-review setup-bedrock setup-vertex simulate-usage skill-doctor skills status
+   stickers stop subtask tasks teleport terminal-setup theme thrash tui ultraplan ultrareview
+   update upgrade usage usage-credits version vim voice web-setup wellbeing workflow-launch-exec
+   workflows`.split(/\s+/),
+);
+
+/**
+ * A grant Claude Code offered on the request: trust this directory, accept edits,
+ * allow this tool. One press answers the request and removes the next dozen.
+ *
+ * We never build one. A malformed entry makes Claude Code drop the whole array
+ * with a warning nobody sees ("malformed updatedPermissions ignored"), so the
+ * only safe move is to recognise what it sent, label it, and hand the same object
+ * back.
+ */
+export type Grant = { label: string; suggestion: Record<string, unknown> };
+
+const DESTINATIONS = new Set(["userSettings", "projectSettings", "localSettings", "session", "cliArg"]);
+
+export function grantsOf(item: PendingItem, max = 3): Grant[] {
+  const out: Grant[] = [];
+  for (const raw of item.permission_suggestions ?? []) {
+    if (out.length >= max) break;
+    if (typeof raw !== "object" || raw === null) continue;
+    const s = raw as Record<string, unknown>;
+    const destination = typeof s.destination === "string" ? s.destination : "";
+    if (!DESTINATIONS.has(destination)) continue;
+
+    let what: string | undefined;
+    if (s.type === "setMode" && typeof s.mode === "string") {
+      what = s.mode === "acceptEdits" ? "Accept edits" : `Switch to ${s.mode}`;
+    } else if (s.type === "addDirectories" && Array.isArray(s.directories) && s.directories.length) {
+      const dirs = s.directories.filter((d): d is string => typeof d === "string");
+      if (!dirs.length) continue;
+      what = dirs.length === 1 ? `Trust ${shortPath(dirs[0])}` : `Trust ${dirs.length} directories`;
+    } else if (s.type === "addRules" && Array.isArray(s.rules) && s.rules.length && typeof s.behavior === "string") {
+      if (s.behavior !== "allow") continue;
+      const names = s.rules
+        .map((r) => (typeof r === "object" && r !== null ? (r as Record<string, unknown>).toolName : undefined))
+        .filter((n): n is string => typeof n === "string");
+      if (!names.length) continue;
+      what = names.length === 1 ? `Allow ${names[0]}` : `Allow ${names.length} tools`;
+    }
+    if (!what) continue;
+    // How far a press reaches is half of what is being agreed to, so it is in the
+    // label: "for this session", "in this project", or nothing hedged at all.
+    const label =
+      destination === "userSettings" ? `Always ${what[0].toLowerCase()}${what.slice(1)}`
+      : destination === "projectSettings" || destination === "localSettings" ? `${what} in this project`
+      : `${what} for this session`;
+    out.push({ label, suggestion: s });
+  }
+  return out;
+}
+
 export function phaseOf(raw?: string | null): string | undefined {
   const prompt = userPrompt(raw);
   if (!prompt) return undefined;
@@ -429,6 +517,8 @@ export function phaseOf(raw?: string | null): string | undefined {
   if (!match) return undefined;
   const name = match[1].split(":").pop();
   if (!name) return undefined;
+  // A plugin's `/morgan:track` is a step; Claude Code's own `/model` is not.
+  if (!match[1].includes(":") && BUILT_IN_COMMANDS.has(name.toLowerCase())) return undefined;
   return truncate(name.replace(/[-_]+/g, " "), LIMITS.ask);
 }
 

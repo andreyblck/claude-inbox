@@ -274,12 +274,92 @@ enum Format {
         return oneLine(name + " " + (first("<command-args>([\\s\\S]*?)</command-args>") ?? ""))
     }
 
+    /// Claude Code's own slash commands, read out of the 2.1.278 binary rather
+    /// than remembered. `/model` is something a person types in the middle of a
+    /// task, not a step of work — it mattered once the step began to be kept
+    /// across turns, because then it sat on the row for the rest of the session.
+    private static let builtInCommands: Set<String> = Set(
+        """
+        add-dir advisor agents ant-trace artifacts auto-mode-setup autocompact autofix-pr autopilot
+        background branch brief btw bug bugfix cd channel chrome claim-credit clear cloud-plugins color
+        compact config context copy daemon dashboard debug-tool-call design-consent design-login
+        design-revoke desktop diff docs effort env exit experiments export extra-usage fast feedback
+        focus fork goal heapdump help hooks ide import input-debug install-github-app install-slack-app
+        investigate issue keybindings limit-reset list-agents login logout loops low-priority mcp memory
+        mobile mock-limits model oauth-refresh onboarding output-style passes pause-memory perf-issue
+        permissions plan plugin plugin-types powerup privacy-settings pro-trial-expired radio
+        rate-limit-options recap release-notes reload-plugins reload-skills remote-control remote-env
+        remote-workflow rename render-debug reset-limits resume rewind sandbox schedule scroll-speed
+        session settings-review setup-bedrock setup-vertex simulate-usage skill-doctor skills status
+        stickers stop subtask tasks teleport terminal-setup theme thrash tui ultraplan ultrareview
+        update upgrade usage usage-credits version vim voice web-setup wellbeing workflow-launch-exec
+        workflows
+        """.split(whereSeparator: \.isWhitespace).map(String.init))
+
     static func phase(fromPrompt prompt: String?) -> String? {
         guard let trimmed = userPrompt(prompt) else { return nil }
         guard trimmed.hasPrefix("/") else { return nil }
         let word = trimmed.dropFirst().prefix { $0.isLetter || $0.isNumber || ":_-".contains($0) }
         guard let name = word.split(separator: ":").last, !name.isEmpty else { return nil }
+        // A plugin's `/morgan:track` is a step; Claude Code's own `/model` is not.
+        if !word.contains(":"), builtInCommands.contains(name.lowercased()) { return nil }
         return truncate(name.replacingOccurrences(of: "[-_]+", with: " ", options: .regularExpression), Limits.ask)
+    }
+
+    /// A grant Claude Code offered on the request: trust this directory, accept
+    /// edits, allow this tool. One press answers the request and removes the next
+    /// dozen.
+    ///
+    /// We never build one. A malformed entry makes Claude Code drop the whole
+    /// array with a warning nobody sees ("malformed updatedPermissions ignored"),
+    /// so the only safe move is to recognise what it sent, label it, and hand the
+    /// same object back untouched.
+    struct Grant: Identifiable, Sendable {
+        var label: String
+        var suggestion: JSONValue
+        var id: String { label }
+    }
+
+    private static let destinations: Set<String> =
+        ["userSettings", "projectSettings", "localSettings", "session", "cliArg"]
+
+    static func grants(_ item: PendingItem, max: Int = 3) -> [Grant] {
+        guard let suggestions = item.permissionSuggestions?.arrayValue else { return [] }
+        var out: [Grant] = []
+        for s in suggestions {
+            if out.count >= max { break }
+            guard let destination = s["destination"]?.stringValue, destinations.contains(destination) else { continue }
+
+            var what: String?
+            switch s["type"]?.stringValue {
+            case "setMode":
+                if let mode = s["mode"]?.stringValue {
+                    what = mode == "acceptEdits" ? "Accept edits" : "Switch to \(mode)"
+                }
+            case "addDirectories":
+                let dirs = (s["directories"]?.arrayValue ?? []).compactMap(\.stringValue)
+                if dirs.count == 1 { what = "Trust \(shortPath(dirs[0]))" }
+                else if dirs.count > 1 { what = "Trust \(dirs.count) directories" }
+            case "addRules":
+                guard s["behavior"]?.stringValue == "allow" else { continue }
+                let names = (s["rules"]?.arrayValue ?? []).compactMap { $0["toolName"]?.stringValue }
+                if names.count == 1 { what = "Allow \(names[0])" }
+                else if names.count > 1 { what = "Allow \(names.count) tools" }
+            default: continue
+            }
+            guard let what else { continue }
+
+            // How far a press reaches is half of what is being agreed to, so it
+            // is in the label.
+            let label: String
+            switch destination {
+            case "userSettings": label = "Always " + what.prefix(1).lowercased() + what.dropFirst()
+            case "projectSettings", "localSettings": label = "\(what) in this project"
+            default: label = "\(what) for this session"
+            }
+            out.append(Grant(label: label, suggestion: s))
+        }
+        return out
     }
 
     /// What a blocked session wants, as a lowercase verb phrase.
