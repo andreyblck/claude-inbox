@@ -383,10 +383,11 @@ private struct Header: View {
 
             if let usage = store.usage.first {
                 HStack(spacing: Theme.Space.snug) {
-                    UsageRing(label: "5h", percentage: usage.rateLimits?.fiveHour?.usedPercentage)
-                    UsageRing(label: "7d", percentage: usage.rateLimits?.sevenDay?.usedPercentage)
+                    UsageRing(label: "5h", percentage: usage.rateLimits?.fiveHour?.usedPercentage,
+                              help: Self.ringHelp("5-hour", usage.rateLimits?.fiveHour))
+                    UsageRing(label: "7d", percentage: usage.rateLimits?.sevenDay?.usedPercentage,
+                              help: Self.ringHelp("7-day", usage.rateLimits?.sevenDay))
                 }
-                .help("Rate limits. They only move while a session is talking.")
                 .padding(.trailing, Theme.Space.tight)
             }
 
@@ -429,6 +430,18 @@ private struct Header: View {
         .padding(.horizontal, Theme.Space.wide)
         .padding(.top, Theme.Space.wide)
         .padding(.bottom, Theme.Space.gap)
+    }
+
+    /// A reading that hides its own staleness is worse than no reading: these only
+    /// move while a session is talking.
+    private static func ringHelp(_ title: String, _ window: UsageRecord.Window?) -> String {
+        guard let used = window?.usedPercentage else {
+            return "\(title) limit — nothing measured yet. It only moves while a session is talking."
+        }
+        var parts = ["\(title) limit — \(Int((100 - min(100, max(0, used))).rounded()))% left"]
+        parts.append("\(Int(used.rounded()))% used")
+        if let resets = Format.resetsIn(window?.resetsAt) { parts.append(resets) }
+        return parts.joined(separator: " · ") + ". Only moves while a session is talking."
     }
 
     private func confirmUninstall() {
@@ -920,7 +933,8 @@ private struct RowCard: View {
     @ViewBuilder
     private var composer: some View {
         if case .session(let s) = row, let pid = s.pid, Peer.canReach(pid: pid) {
-            Composer(pid: pid, permissionMode: s.permissionMode, text: $draft, onSent: { store.reload() })
+            Composer(pid: pid, permissionMode: s.permissionMode, awaitingDecision: s.needsYou,
+                     text: $draft, onSent: { store.reload() })
         }
     }
 
@@ -978,6 +992,9 @@ private struct RowCard: View {
 private struct Composer: View {
     let pid: Int
     let permissionMode: String?
+    /// The session's last turn ended by asking the person for a decision. A note
+    /// cannot carry that decision, and saying so here beats finding out later.
+    var awaitingDecision = false
     @Binding var text: String
     let onSent: () -> Void
 
@@ -1041,10 +1058,32 @@ private struct Composer: View {
                     }
                 }
             } else {
-                Text("Arrives as a message from a peer session, not as you.")
+                HStack(spacing: Theme.Space.snug) {
+                    // Claude Code frames anything arriving from outside the
+                    // terminal as a peer message, on purpose: nothing else on the
+                    // machine should be able to speak with your authority. It is
+                    // a nudge, and it is worth saying which kind.
+                    Text(awaitingDecision
+                         ? "Arrives as a peer's note — steering, not your approval."
+                         : "Arrives as a message from a peer session, not as you.")
+                        .font(Theme.Font.micro)
+                        .foregroundStyle(.tertiary)
+                    // When it has to be you saying it, the shortest honest path is
+                    // the clipboard and the terminal it is already running in.
+                    Button("Say it yourself") {
+                        let note = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !note.isEmpty {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(note, forType: .string)
+                        }
+                        Terminal.reveal(pid: pid)
+                    }
+                    .buttonStyle(.link)
                     .font(Theme.Font.micro)
-                    .foregroundStyle(.tertiary)
-                    .padding(.leading, Theme.Space.gap)
+                    .help("Copy the note and bring the session's terminal forward — paste it there and it is you talking")
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, Theme.Space.gap)
             }
         }
         .onAppear { held = Settings.willHold(permissionMode: permissionMode) }

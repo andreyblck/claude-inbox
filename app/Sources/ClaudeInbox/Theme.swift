@@ -125,10 +125,18 @@ extension View {
 struct UsageRing: View {
     let label: String
     let percentage: Double?
+    var help: String = ""
     var size: CGFloat = 22
+    @State private var hovering = false
 
     private var fraction: Double { min(1, max(0, (percentage ?? 0) / 100)) }
     private var tint: Color { Theme.usageTint(percentage ?? 0) }
+    /// What the question actually is. "5h" says which window; hovering asks how
+    /// much of it is left, so that is the number that appears.
+    private var remaining: String? {
+        guard let percentage else { return nil }
+        return "\(Int((100 - min(100, max(0, percentage))).rounded()))%"
+    }
 
     var body: some View {
         ZStack {
@@ -139,11 +147,15 @@ struct UsageRing: View {
                 .stroke(tint.opacity(percentage == nil ? 0.25 : 0.9),
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text(label)
-                .font(.system(size: 8, weight: .semibold))
-                .foregroundStyle(.secondary)
+            Text(hovering ? (remaining ?? label) : label)
+                .font(.system(size: hovering && remaining != nil ? 7.5 : 8, weight: .semibold))
+                .foregroundStyle(hovering ? AnyShapeStyle(tint) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
+                .monospacedDigit()
+                .contentTransition(.numericText())
         }
         .frame(width: size, height: size)
+        .help(help)
+        .onHover { value in withAnimation(Theme.hover) { hovering = value } }
         .animation(Theme.expand, value: fraction)
     }
 }
