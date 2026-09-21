@@ -1,135 +1,193 @@
-# claude-inbox
+# Claude Inbox
 
-A native macOS control surface for Claude Code, built as a Raycast extension.
+A menu bar app for macOS that shows every Claude Code session on your machine
+that is waiting for you — and lets you answer it without finding the terminal.
 
-One hotkey shows every Claude Code session on the machine that is waiting for you,
-what it is waiting for, and answers it — without finding the terminal window.
+<p align="center">
+  <img src="docs/screenshots/panel-dark.png" width="440" alt="The panel: sessions grouped into Waiting for You, Answered, Running">
+</p>
 
-## Why
+Run a dozen sessions in parallel and the bottleneck stops being the model. It
+becomes you: a session blocks on a permission prompt or ends its turn with a
+question, and you find out twenty minutes later by accident. The terminal has no
+aggregate view, and the system notification says "Claude is waiting for your
+input" without saying which session, or for what.
 
-With a dozen parallel sessions the bottleneck stops being the model and becomes the
-human round trip: a session blocks on a permission prompt or a question, and you find
-out twenty minutes later by accident. The terminal gives no aggregate view, and
-notifications (bell, banner) say "something happened" without saying what, and cannot
-be answered.
+Claude Inbox answers three questions at a glance:
 
-## Shape
+- **Who needs me?** A permission to approve, a decision to make, a question to
+  answer — with Approve and Deny right on the row, and on the banner.
+- **What did they say?** A finished turn is an answer. Read the whole thing, as
+  rendered markdown, in the panel.
+- **What is everyone doing?** Every running session, named after the issue it is
+  working on, with the model's own sentence about its current move.
 
-Two halves, one product:
+## What it looks like
 
-```
-bridge/    Claude Code hooks (bash + jq, no dependencies)
-           installed once at user scope -> every session on the machine reports in,
-           whatever terminal it runs in
-extension/ Raycast extension: inbox, menu bar board, dispatch
-```
+<p align="center">
+  <img src="docs/screenshots/decision-dark.png" width="440" alt="An open row: a permission with Approve and Deny, and a decision the session is waiting on, with the full answer under it">
+</p>
 
-They talk through a directory, not a daemon:
+A session that ended its turn by asking you something moves to **Waiting for You**
+with the ask in one line — "Decide: keep legacy_rate one more release, or drop it
+now" — and a banner that says the same. Open it and the whole answer is there,
+with one-tap replies drafted in the session's language.
 
-```
-~/.claude/inbox/            mode 0700
-  sessions/<session_id>.json   registry: cwd, state, phase, last message
-  pending/<req_id>.json        what a session is waiting for, and the pid holding it open
-  verdicts/<req_id>.json       the answer, written by Raycast
-  usage/<config_dir>.json      rate limits, context, cost — one file per account
-  config-dirs                  every config directory the bridge was installed into
-  heartbeat, heartbeat-menubar Raycast saying it is here
-```
+<p align="center">
+  <img src="docs/screenshots/permission-light.png" width="440" alt="Light appearance: a permission request opened, showing the exact command">
+</p>
 
-There is no background process. Raycast cannot host one (its commands are
-short-lived), and none is needed: a blocking hook is its own waiter. A
-`PermissionRequest` hook may run for up to 600s by default, so the hook process
-itself holds the request open and waits for the verdict file.
+Sessions are named after the tracker issue they were opened with (`ACME-231`),
+or, when there is none, a short name the app asks a model for once ("Onboarding
+email", "Docs search"). Answers you have not opened carry the blue dot Mail uses.
+Running sessions show the three dots of someone typing.
 
-## Where the state comes from
+Everything follows the system: light and dark appearance, your accent colour,
+SF Symbols, the fonts and spacing of every other panel on the Mac.
 
-Three sources, because each knows something the others don't:
+## Install
 
-| Source | Knows | Needs the bridge installed |
-|---|---|---|
-| `<config>/sessions/*.json` | who is alive right now: session name, cwd, status, pid | no |
-| `bridge/` hooks | what a session is waiting for, its phase, its last message | yes |
-| `bridge/statusline.sh` | rate limits, context, cost | yes |
-
-The live registry matters more than it looks: **hooks are read when a session
-starts**, so a session that was already running when the bridge was installed
-never reports in. Reading Claude Code's own registry makes those sessions appear
-anyway, which is the normal case on the first run.
-
-It lives under the **config directory**, not under `$HOME` — so it moves with
-`CLAUDE_CONFIG_DIR`. That is why `install.sh` records every config directory it
-installs into: the reader cannot guess where an account keeps its sessions, and
-guessing wrong shows an empty inbox with a dozen sessions running.
-
-Neither source is authoritative on its own, so the merge takes **the freshest
-observation**. The registry does not know a session ended cleanly; the hooks do not
-know a new turn started until the next event fires. Pick a fixed winner and rows
-get pinned to a state that stopped being true minutes ago.
-
-## The one contract that matters
-
-A `PermissionRequest` hook answers with an **object**:
-
-```json
-{"hookSpecificOutput": {"hookEventName": "PermissionRequest",
-                        "decision": {"behavior": "allow"}}}
-{"hookSpecificOutput": {"hookEventName": "PermissionRequest",
-                        "decision": {"behavior": "deny", "message": "not on staging"}}}
-```
-
-A string where that object goes fails validation, and the failure is quiet: Claude
-Code falls through to the normal prompt, which from the outside looks exactly like
-the hook timing out. See `spikes/README.md` for the full contract, read out of the
-2.1.278 binary.
-
-## Safety rule for every hook in `bridge/`
-
-Never break a session. On any error, any missing tool, any malformed payload:
-exit 0 with no output. A timed-out or silent hook means "no decision", and Claude
-Code continues through its normal permission flow. The bridge can only ever add a
-faster path, never remove the existing one.
-
-The corollary, learned the hard way: **printing the wrong thing is worse than
-printing nothing.** Output that fails the schema is surfaced into the session as an
-error. Silence is the safe failure; a malformed decision is not.
-
-## Try it
+Needs macOS 15 or later, the Xcode command line tools, and Claude Code signed in.
 
 ```bash
-cd extension && npm install && npm run dev     # installs into Raycast, hot reloads
-../bridge/install.sh                           # hooks + status line, backs up settings.json
-../bridge/demo.sh                              # fill the inbox with believable data
-../bridge/demo.sh --clear                      # remove every demo row
-../bridge/install.sh --uninstall               # hooks out, your status line back
+git clone https://github.com/andreyblck/claude-inbox.git
+cd claude-inbox
+./bridge/install.sh          # hooks + status line into ~/.claude, backs up settings.json
+./app/package.sh             # builds the app and installs it into /Applications
+open /Applications/ClaudeInbox.app
 ```
 
-**One manual step Raycast requires:** open Raycast, run **Claude Sessions** once and
-allow it to run in the background, or enable it under Settings → Extensions → Claude
-Inbox. Until it has run, the bridge deliberately stays quiet rather than waking a
-command that is not there — otherwise Raycast answers every nudge with an error
-toast, once per turn, per session.
+Keep the clone where it is: the hooks run from `bridge/` inside it. The app is
+unsigned, so a copy built on another Mac opens with right-click → Open the first
+time; one you built yourself just opens.
 
-`install.sh` wraps an existing `statusLine` rather than replacing it, and the
-permission hook waits 20s by default (`--wait N`) before letting the terminal
-prompt as usual — so the worst case of a bug is a 20 second delay, never a
-blocked session. With Raycast not running it does not wait at all.
+The panel is on **⌥Space**, or a click on the menu bar item. Allow notifications
+when asked — a banner is how a session that needs you reaches you when the panel
+is closed. Sessions that were already running when the bridge went in appear on
+their next turn.
+
+To take it out again:
+
+```bash
+./bridge/install.sh --uninstall   # hooks out, your status line back
+```
+
+## Using it
+
+| | |
+|---|---|
+| **⌥Space** | open or close the panel |
+| type | filter by issue, name, or what the session said |
+| **↑ ↓ ↵** | move between rows, open one |
+| **⌘↵ / ⌘⌫** | approve / deny the focused permission |
+| **⌘1…9** | open the n-th waiting row |
+| **⌘L** | open the session's issue in Linear |
+| **⌘T** | bring the terminal the session runs in to the front |
+| **Esc** | clear the filter, then close |
+| right-click | copy the answer, the resume command or the issue key; show in Finder; rename |
+
+An open row has a note field. Notes arrive in the session as a message from a
+peer session, not as you — Claude Code frames them that way on purpose, so
+nothing outside the terminal can impersonate the person at it. **✦** in the
+header asks for a digest of everything at once; **+** starts a new session from
+the panel.
+
+## How it works
+
+Two halves, talking through a directory. No daemon, no server, no API key.
+
+```
+bridge/   Claude Code hooks: bash + jq, nothing else. Installed once at user
+          scope, so every session on the machine reports in, whatever terminal
+          it runs in.
+app/      The menu bar app, Swift + SwiftUI, reading what the hooks wrote.
+spec/     The rules the app is ported from — state, merge, how a row gets its
+          line — as TypeScript with tests. When a rule changes, it changes here
+          first.
+```
+
+```
+~/.claude/inbox/                 mode 0700
+  sessions/<session_id>.json     state, step, issue, what was asked, what it said
+  pending/<req_id>.json          a permission waiting for a verdict, and the pid holding it open
+  verdicts/<req_id>.json         the verdict, written by the app
+  usage/<config_dir>.json        rate limits, context, cost — one per account
+  labels.json, asks.json         names and readings the app asked a model for, kept so
+                                 they are asked once
+```
+
+A `PermissionRequest` hook is its own waiter: the hook process holds the request
+open, the app drops a verdict file, the hook prints the decision and the tool
+runs. If nothing answers within 20 seconds the hook goes quiet and the terminal
+prompts as usual — the worst case of a bug in this app is a 20-second delay,
+never a blocked session. With the app not running the hook does not wait at all.
+
+Every hook follows one rule: **never break a session.** On any error, exit 0 and
+print nothing. Silence means "no decision" and Claude Code carries on through its
+normal flow; the bridge can only ever add a faster path, never take the existing
+one away.
+
+### Where the words come from
+
+A row's line is, in order: the sentence the model wrote before its last action
+(free, already in your language), what you asked for, Claude Code's own title,
+and the tool being used. That covers a running session.
+
+Two things a transcript cannot say are asked of the `claude` already on your
+machine, on your own account, with Haiku:
+
+- **A name**, once per session that names no issue. "GSC" beats `skyaccess-d5`.
+- **A reading of a finished turn**, once per message: is it waiting for you, and
+  for what, in one line — plus up to three replies you are likely to give. A tap
+  drafts one into the note field; it never sends. Waiting for CI, agents or
+  timers counts as *no*: the session will wake itself.
+
+Each is one small call, cached on disk, run off to the side and never on the way
+to a redraw. They answer in the language the session is written in, and they
+run with your Claude Code settings left out (`--setting-sources local`), so a
+"reply in Russian" preference does not leak into a line about an English session.
+Nothing leaves the machine that Claude Code was not already sending.
+
+### Which session is which
+
+Five sessions in one checkout are `skyaccess-ef`, `-a1`, `-62` — names nobody
+chose. The issue key is what people call the work, so it is the label: read from
+a Linear link in what you typed, or a bare key like `ACME-231` (three digits or
+more — `WI-10` is a real string in a real prompt). Named once, kept until a newer
+one is named, because a follow-up never repeats it.
 
 ## Tests
 
 ```bash
-bridge/selftest.sh        # the hook's own logic, against a throwaway inbox
-bridge/install-test.sh    # install.sh against throwaway config dirs — 12 cases
-bridge/e2e.sh             # a real `claude -p` session; --deny and --silent too
-cd extension && npm test  # the merge rules, and the hook run against writeVerdict
+cd spec && npm install && npm test   # the rules: state, merge, subject, transcript reading — 91 cases
+bridge/selftest.sh                   # the hooks against a throwaway inbox
+bridge/install-test.sh               # install.sh against throwaway config dirs
+bridge/e2e.sh                        # a real `claude -p` session blocks, a verdict file decides it
 ```
 
-`e2e.sh` is the one that earns its keep. `selftest.sh` was green for a day while
-the product did not work at all, because it asserted the same wrong shape the hook
-emitted — a test written from the same head as the code proves self-consistency,
-not a contract. `e2e.sh` drives real Claude Code and checks whether the tool
-actually ran.
+`e2e.sh` is the one that earns its keep: it drives real Claude Code. A test that
+asserts what the hook emits proves nothing about what Claude Code accepts — the
+first version of the permission decision had the wrong shape, passed its own
+tests for a day, and could not approve anything.
+
+The Swift port has no test target of its own. `ClaudeInbox --dump` prints what
+the panel would show, so the port can be diffed against `spec/` on the same data;
+`ClaudeInbox --snapshot out.png [--light] [--open N]` draws the panel to a file,
+which is how the screenshots above were made — from `bridge/demo.sh`, on an inbox
+of invented sessions.
 
 ## Status
 
-Alpha. The permission round trip works end to end and is covered by tests.
-See PLAN.md for what is next and spikes/README.md for the verified ground truth.
+Works, used daily. Verified against Claude Code 2.1.278; the hook payloads it
+depends on are recorded in `spikes/README.md`. Things not done yet:
+
+- A permission's details (which command) live only while the hook waits, so a
+  request you missed shows as "needs your permission" without the command.
+- Questions (`AskUserQuestion`) and plans (`ExitPlanMode`) are shown but answered
+  in the terminal; answering them from the panel is the next slice.
+- "Go to Terminal" brings the app forward, not the tab: Warp and most others have
+  no way to ask for one.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

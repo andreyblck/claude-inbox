@@ -40,32 +40,64 @@ pend() { # req, tool, input-json, cwd, ago
       session_id:("demo-" + $req), cwd:$cwd, tool_name:$tool, tool_input:$input,
       permission_mode:"default", transcript_path:null}' > "$INBOX_DIR/pending/$1.json"
 }
-sess() { # id, state, cwd, phase, ago, last message
-  "$JQ" -n --arg id "$1" --arg st "$2" --arg cwd "$3" --arg ph "$4" --argjson ts "$((now - $5))" --arg msg "$6" \
-    '{demo:true, session_id:$id, state:$st, ts:$ts, cwd:$cwd,
-      phase:(if $ph == "" then null else $ph end), permission_mode:"default",
-      transcript_path:null, last_message:(if $msg == "" then null else $msg end)}' > "$INBOX_DIR/sessions/$1.json"
+# A row carries everything the panel would otherwise read from a transcript or
+# ask a model for — the name, the step, what was asked, what it said, and the
+# reading of that — so the demo looks like a working day without one.
+sess() { # id, state, cwd, issue, label, phase, ago, last prompt, last message, needs_you, line, replies (a|b|c)
+  "$JQ" -n --arg id "$1" --arg st "$2" --arg cwd "$3" --arg issue "$4" --arg label "$5" --arg ph "$6" \
+    --argjson ts "$((now - $7))" --arg prompt "$8" --arg msg "$9" --argjson needs "${10}" --arg line "${11}" --arg replies "${12}" \
+    '{demo:true, session_id:$id, state:$st, ts:$ts, cwd:$cwd, permission_mode:"default", transcript_path:null,
+      issue:(if $issue == "" then null else $issue end),
+      label:(if $label == "" then null else $label end),
+      phase:(if $ph == "" then null else $ph end),
+      last_prompt:(if $prompt == "" then null else $prompt end),
+      last_message:(if $msg == "" then null else $msg end),
+      needs_you:$needs,
+      line:(if $line == "" then null else $line end),
+      replies:(if $replies == "" then [] else ($replies | split("|")) end)}' > "$INBOX_DIR/sessions/$1.json"
 }
 
-pend demo01 Bash '{"command":"rm -rf dist && npm run build"}' "$HOME/work/skyaccess-api" 140
-pend demo02 Write '{"file_path":"/Users/me/work/skyaccess-webapp/src/deploy.ts","content":"…"}' "$HOME/work/skyaccess-webapp" 420
-pend demo03 Bash '{"command":"git push --force-with-lease origin staging"}' "$HOME/work/tarot" 60
+pend demo01 Bash '{"command":"npm run db:migrate -- --env staging","description":"Apply the pending migrations to staging"}' "$HOME/work/acme-api" 140
 
-sess demo-s1 working "$HOME/work/skyaccess-webapp" "pull" 240 ""
-sess demo-s2 working "$HOME/work/morgan" "track" 720 ""
-sess demo-s3 working "$HOME/work/english-blck" "scope" 900 ""
-sess demo-s4 working "$HOME/work/livechat" "clean" 1500 ""
-sess demo-s5 working "$HOME/work/redline" "pull" 1800 ""
-sess demo-s6 working "$HOME/work/blckmeet" "qa" 2400 ""
-sess demo-s7 idle "$HOME/work/finance-app" "" 300 "Waiting on you: which currency should the report default to?"
-sess demo-s8 done "$HOME/work/telegram-voice" "" 90 "Shipped. Tests pass, PR opened."
-sess demo-s9 failed "$HOME/work/bunker123" "" 600 "Build failed: missing DATABASE_URL."
+sess demo-s1 idle "$HOME/work/acme-api" "ACME-231" "" "track" 660 \
+  "/track https://linear.app/acme/issue/ACME-231/legacy-rate-column is this done? finish it if not" \
+  "Both PRs are green and merged to staging.
+
+I found that the migration drops the \`legacy_rate\` column, which the finance export still reads.
+
+**I need your call before going further:**
+
+1. Keep the column for one more release, or
+2. Drop it now and patch the export in the same PR.
+
+I'd recommend option 1: the export runs on the 1st, and a broken finance run costs more than a column." \
+  true "Decide: keep legacy_rate one more release, or drop it now and patch the export" \
+  "Keep it one release|Drop it now|Show me the diff"
+
+sess demo-s2 idle "$HOME/work/acme-web" "ACME-198" "" "pull" 180 \
+  "/pull https://linear.app/acme/issue/ACME-198/hide-cancelled-legs" \
+  "Pushed the fix and opened PR #482. CI is running — the background watcher will wake me when the checks finish, then I'll merge if green." \
+  false "PR #482 opened; CI running, will merge on green" ""
+
+sess demo-s3 idle "$HOME/work/acme-web" "" "Onboarding email" "" 2100 \
+  "rewrite the onboarding email for step 3, keep it under 120 words" \
+  "Draft is in \`emails/onboarding-3.md\` at 108 words. Two versions of the subject line — pick one when you review." \
+  false "Step-3 draft written (108 words); two subject lines to choose from" ""
+
+sess demo-s4 working "$HOME/work/acme-api" "ACME-205" "" "pull" 300 \
+  "/pull add a shared predicate for empty-leg filtering and use it in both endpoints" "" false "" ""
+
+sess demo-s5 working "$HOME/work/acme-docs" "" "Docs search" "" 90 \
+  "the search index is stale after the sidebar change — rebuild it and check the top 20 queries" "" false "" ""
+
+sess demo-s6 done "$HOME/work/acme-web" "ACME-190" "" "clean" 1500 "" \
+  "Shipped. Tests pass, PR #479 merged to staging." false "" ""
 
 "$JQ" -n --argjson ts "$((now - 180))" --arg cfg "$HOME/.claude" \
   --argjson five "$((now + 7300))" --argjson week "$((now + 250000))" \
   '{demo:true, ts:$ts, config_dir:$cfg, session_id:"demo-s1", model:"Opus 5",
     rate_limits:{five_hour:{used_percentage:38.4, resets_at:$five},
-                 seven_day:{used_percentage:71.2, resets_at:$week}},
+                 seven_day:{used_percentage:61.2, resets_at:$week}},
     context:{used_percentage:42.7, context_window_size:1000000},
     cost:{total_cost_usd:3.21}}' > "$INBOX_DIR/usage/demo.json"
 
@@ -87,5 +119,5 @@ if true; then
   disown 2>/dev/null || true
 fi
 
-echo "seeded: 3 waiting, 6 running, 1 idle, 1 done, 1 failed, usage 5h 38% / 7d 71%"
+echo "seeded: 1 permission, 1 decision, 2 answers, 2 running, 1 done, usage 5h 38% / 7d 61%"
 echo "clear with: $(pwd)/demo.sh --clear"
