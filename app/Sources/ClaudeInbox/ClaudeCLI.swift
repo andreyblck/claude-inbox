@@ -56,7 +56,9 @@ enum ClaudeCLI {
     /// subprocess and a blocking read, and an `async` signature would read as
     /// "safe to await anywhere" when it freezes the panel for ten seconds.
     static func ask(_ prompt: String) throws -> String {
+        guard Spend.enabled else { throw Failure.failed("Model calls are off — turn them on in the menu.") }
         guard let executable else { throw Failure.noCLI }
+        Spend.record()
 
         // The session would otherwise report itself into the inbox it is reading.
         // Pointing its hooks at a throwaway directory keeps it out.

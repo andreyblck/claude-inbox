@@ -420,6 +420,12 @@ private struct Header: View {
                     if let url = Bundle.releasesURL { NSWorkspace.shared.open(url) }
                 }
                 Divider()
+                Toggle("Name sessions and read turns", isOn: Binding(
+                    get: { Spend.enabled },
+                    set: { Spend.enabled = $0; store.reload() }))
+                Button("\(Spend.todayCount) model calls today") {}
+                    .disabled(true)
+                Divider()
                 if Bridge.bundledInstaller != nil {
                     if store.bridgeInstalled {
                         Button("Reinstall Bridge") { store.installBridge() }

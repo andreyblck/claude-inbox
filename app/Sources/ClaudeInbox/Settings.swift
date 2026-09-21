@@ -67,3 +67,45 @@ enum Settings {
         return (try? out.write(to: URL(fileURLWithPath: path))) != nil
     }
 }
+
+/// What the app is allowed to ask a model, and what that has cost.
+///
+/// Every name and every reading is a small Haiku call on the person's own
+/// account. Small, but it comes out of the same window their work does — and the
+/// first time that window ran red, there was no way to turn this off and no way
+/// to see what it had spent. Both now exist.
+enum Spend {
+    private static let enabledKey = "modelCallsEnabled"
+    private static let countKey = "modelCallsCount"
+    private static let dayKey = "modelCallsDay"
+
+    /// On unless someone turned it off. A row that says `skyaccess-d5` instead of
+    /// "GSC" is worse, so the default earns its keep — but it is a default, not a
+    /// condition of using the app.
+    static var enabled: Bool {
+        get {
+            UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
+        }
+        set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
+    }
+
+    private static var today: Int {
+        Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
+    }
+
+    /// Counted rather than estimated: a number you can check beats a promise that
+    /// it is cheap.
+    static func record() {
+        let defaults = UserDefaults.standard
+        if defaults.integer(forKey: dayKey) != today {
+            defaults.set(today, forKey: dayKey)
+            defaults.set(0, forKey: countKey)
+        }
+        defaults.set(defaults.integer(forKey: countKey) + 1, forKey: countKey)
+    }
+
+    static var todayCount: Int {
+        UserDefaults.standard.integer(forKey: dayKey) == today
+            ? UserDefaults.standard.integer(forKey: countKey) : 0
+    }
+}

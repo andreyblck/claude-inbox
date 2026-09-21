@@ -121,7 +121,7 @@ Two things a transcript cannot say are asked of the `claude` on your machine —
 | **Name** | once per session with no issue key | 1–3 words: "GSC", "Onboarding email" |
 | **Reading** | once per finished turn | YES/NO — is it waiting for *you*? — one line, up to three likely replies (a tap drafts; never sends) |
 
-Waiting for CI, agents or timers is NO: the session wakes itself. Answers come in the session's language; the calls run with your Claude Code settings left out (`--setting-sources local`), so a "reply in Russian" preference does not decide the language of a line about an English session. Nothing leaves the machine that Claude Code was not already sending.
+Both can be turned off — **… → Name sessions and read turns** — and the menu shows how many calls were made today. Waiting for CI, agents or timers is NO: the session wakes itself. Answers come in the session's language; the calls run with your Claude Code settings left out (`--setting-sources local`), so a "reply in Russian" preference does not decide the language of a line about an English session. Nothing leaves the machine that Claude Code was not already sending.
 
 ## Build and test
 
