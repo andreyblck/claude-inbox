@@ -57,26 +57,55 @@ hooks they started with and pick up the new ones on their next turn.
 
 ## What it does
 
-<p align="center">
-  <img src="docs/screenshots/decision-dark.png" width="440" alt="An open row: a permission with Approve and Deny, and a decision the session is waiting on, with the full answer under it">
-</p>
+Four kinds of row, and each one is answered where you read it.
 
-| Section | What lands there |
-|---|---|
-| **Waiting for You** | questions (`AskUserQuestion`) answered on the card — tap an option or type your own; plans (`ExitPlanMode`) read and approved there too; permission requests — Approve / Deny on the row and on the banner, plus **Allow and…** for the broader grant Claude Code itself offers (trust this directory, accept edits), which answers this request and the next dozen; turns that ended by asking you something, with the ask in one line and one-tap replies |
-| **Answered** | finished turns, unread ones with a blue dot; open a row for the whole answer as rendered markdown |
-| **Running** | what each session is doing right now, in the model's own words |
-
-- Rows are named after the tracker issue the session works on (`ACME-231`, from a Linear link or a bare key in your prompt), else a short generated name ("Docs search"), else the session name.
-- Notes go back into a running session, signed with who typed them and where. Claude Code still frames them as a peer's message, on purpose: nothing outside the terminal can impersonate you, and the signature is attribution rather than authority — anything running as you could write the same line. It answers a real objection, though, which a session raised out loud after four unsigned one-word notes: *no signature, no one to reply to.*
-- **If you want a note to carry your authority**, that is a decision to make at the receiving end, knowingly: a line in your own `CLAUDE.md` telling your sessions how to read a signed note. It trades a boundary — anything on the machine running as you could then steer a session — for not walking to the terminal. The alternative that costs nothing: have sessions ask with `AskUserQuestion`, and answer that in the panel, where the answer travels on the permission channel and carries your authority by construction.
-- Tapping a banner opens the panel on that row, expanded. Approve and Deny are on the banner itself for a permission.
-- **✦** digests everything at once; **+** starts a session from the panel; right-click a row for Linear, terminal, copy, rename.
-- Native: light/dark, your accent colour, system fonts and symbols.
+### A question, with its options on the card
 
 <p align="center">
-  <img src="docs/screenshots/permission-light.png" width="440" alt="Light appearance: a permission request opened, showing the exact command">
+  <img src="docs/screenshots/question-dark.png" width="440" alt="A question row expanded: the question, three options as radio buttons, and a field for an answer that was not on the list">
 </p>
+
+A session that stops to ask you something shows the question itself — not "a
+session needs you". One tap on an option answers it and the session carries on.
+The field underneath is for the answer that was not on the list.
+
+### A plan, read where you read everything else
+
+<p align="center">
+  <img src="docs/screenshots/plan-light.png" width="440" alt="A plan row expanded in light appearance, showing the plan as rendered markdown with Approve plan and Reject">
+</p>
+
+The whole plan, as rendered markdown, with the decision on the same card. Light
+and dark follow the system — this is the same panel.
+
+### A permission, and the grant that stops the next dozen
+
+<p align="center">
+  <img src="docs/screenshots/permission-light.png" width="440" alt="A permission row expanded, showing the exact command with Approve, Deny, and an Allow and… menu">
+</p>
+
+The exact command, then Approve or Deny. **Allow and…** offers what Claude Code
+itself suggests — trust this directory, accept edits, allow this tool — so one
+press answers this request and the ones after it. Approve and Deny are on the
+notification too.
+
+### An answer, without going to find it
+
+<p align="center">
+  <img src="docs/screenshots/decision-dark.png" width="440" alt="An answered row expanded: what was asked, then the session's full reply as rendered markdown">
+</p>
+
+What you asked, then everything the session said since — rendered, scrollable,
+selectable. When the reply asks you something, up to three likely answers appear
+as chips: a tap drafts one into the note field, and the field sends it back into
+the running session. Unread answers carry the blue dot Mail uses; running
+sessions show the three dots of someone typing.
+
+Rows are named after the tracker issue the session works on (`ACME-231`, read
+from a Linear link or a bare key in what you typed), else a short generated name
+("Onboarding email"), else the session's own name. **✦** in the header writes one
+paragraph across every session; **+** starts a new one without a terminal;
+right-click a row for Linear, the terminal, copy, or rename.
 
 ## Keyboard
 

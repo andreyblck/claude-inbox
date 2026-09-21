@@ -72,6 +72,12 @@ pend demo01 Bash '{"command":"npm run db:migrate -- --env staging","description"
     options:[{label:"Keep legacy_rate"},{label:"Drop it and patch the export"},{label:"Ship behind a flag"}]}]}}' \
   > "$INBOX_DIR/pending/demo02.json"
 
+# A plan, read and approved on the card like a question.
+"$JQ" -n --argjson ts "$((now - 200))" '{demo:true, req:"demo03", kind:"plan", state:"blocked.plan", ts:$ts,
+  session_id:"demo-p", cwd:"'"$HOME"'/work/acme-api", tool_name:"ExitPlanMode", permission_mode:"default", transcript_path:null,
+  tool_input:{plan:"## Drop `legacy_rate` safely\n\n1. Add `rate_cents` and backfill it from `legacy_rate` in one migration — no reads change yet.\n2. Point the finance export at the new column, behind `FINANCE_V2`.\n3. Run both for one billing cycle and diff the totals.\n4. Drop `legacy_rate` once the diff is empty two months running.\n\n**Not in this plan:** the marketplace markup, which reads neither column."}}' \
+  > "$INBOX_DIR/pending/demo03.json"
+
 sess demo-s1 idle "$HOME/work/acme-api" "ACME-231" "" "track" 660 \
   "/track https://linear.app/acme/issue/ACME-231/legacy-rate-column is this done? finish it if not" \
   "Both PRs are green and merged to staging.
