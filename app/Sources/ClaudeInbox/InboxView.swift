@@ -15,7 +15,8 @@ struct InboxView: View {
         guard !query.isEmpty else { return store.rows }
         let needle = query.lowercased()
         return store.rows.filter { row in
-            Self.haystack(row).lowercased().contains(needle)
+            if case .session(let s) = row, !s.search.isEmpty { return s.search.contains(needle) }
+            return Self.haystack(row).lowercased().contains(needle)
         }
     }
 
@@ -24,9 +25,25 @@ struct InboxView: View {
         case .pending(let p):
             Format.projectName(cwd: p.cwd, fallback: p.sessionId, name: nil) + " " + Format.askPhrase(p, max: 200)
         case .session(let s):
-            Format.projectName(cwd: s.cwd, fallback: s.sessionId, name: s.name)
+            // Both names: the issue is what the row shows, the session name is
+            // what the terminal tab shows, and either is a fair thing to type.
+            Format.label(s) + " " + Format.projectName(cwd: s.cwd, fallback: s.sessionId, name: s.name)
                 + " " + Format.subject(s, max: 300) + " " + (s.phase ?? "")
         }
+    }
+
+    /// Said when there is nothing to say. One per day, so it is a small surprise
+    /// and never a slot machine.
+    private static var quiet: String {
+        let lines = [
+            "Sessions appear the moment one blocks on a decision.",
+            "Every session is minding its own business.",
+            "No one is waiting. Go make coffee.",
+            "All quiet. The machines have it covered.",
+            "Inbox zero, and nobody had to archive anything.",
+        ]
+        let day = Calendar.current.ordinality(of: .day, in: .year, for: Date()) ?? 0
+        return lines[day % lines.count]
     }
 
     private func rows(in group: StateGroup) -> [Row] {
@@ -37,48 +54,47 @@ struct InboxView: View {
         visible.indices.contains(cursor) ? visible[cursor].id : nil
     }
 
+    private var focusedRow: Row? {
+        visible.indices.contains(cursor) ? visible[cursor] : nil
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             Header(store: store, composing: $composing)
             search
-            Divider().opacity(0.5)
+            Divider()
 
             if composing {
                 NewTask(store: store, composing: $composing)
-                Divider().opacity(0.5)
+                Divider()
             }
             // Silence that looks like nothing happening, but is a permission
             // nobody was told about, is the worst failure this app can have.
             if Notifier.shared.settled == true, !Notifier.shared.authorized {
-                HStack(spacing: Theme.Space.snug) {
-                    Image(systemName: "bell.slash")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.orange)
-                    Text("Notifications are off, so nothing will interrupt you.")
-                        .font(.system(size: 10))
+                HStack(spacing: Theme.Space.step) {
+                    Image(systemName: "bell.slash.fill")
                         .foregroundStyle(.secondary)
-                    Button("Settings") { Notifier.shared.openSystemSettings() }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                    Spacer()
+                    Text("Notifications are off, so nothing will interrupt you.")
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: Theme.Space.step)
+                    Button("Open Settings") { Notifier.shared.openSystemSettings() }
+                        .buttonStyle(.link)
                 }
+                .font(Theme.Font.caption)
                 .padding(.horizontal, Theme.Space.wide)
-                .padding(.vertical, Theme.Space.snug)
-                .background(Color.orange.opacity(0.08))
-                Divider().opacity(0.5)
+                .padding(.vertical, Theme.Space.step)
+                Divider()
             }
             if store.digest != nil || store.problem != nil {
                 DigestBanner(store: store)
-                Divider().opacity(0.5)
+                Divider()
             }
 
             Group {
                 if !store.bridgeInstalled {
                     Placeholder(
                         symbol: "powerplug",
-                        tint: .orange,
-                        title: "The bridge is not installed",
+                        title: "The Bridge Is Not Installed",
                         // A quiet machine and a disconnected one look identical
                         // to a reader. Say which one this is.
                         detail: "Run bridge/install.sh once. Until then nothing reports in.")
@@ -87,22 +103,20 @@ struct InboxView: View {
                     // needs you" is a claim nobody has checked.
                     Placeholder(
                         symbol: "ellipsis",
-                        tint: .secondary,
-                        title: "Reading the inbox",
+                        title: "Reading the Inbox",
                         detail: "")
                 } else if store.rows.isEmpty {
                     Placeholder(
                         symbol: "checkmark.circle",
-                        tint: .green,
-                        title: "Nothing needs you",
-                        detail: "Sessions appear the moment one blocks on a decision.")
+                        title: "Nothing Needs You",
+                        detail: Self.quiet)
                 } else {
                     list
                 }
             }
 
             if let account = store.usage.first {
-                Divider().opacity(0.5)
+                Divider()
                 Footer(usage: account)
             }
         }
@@ -120,8 +134,7 @@ struct InboxView: View {
     private var search: some View {
         HStack(spacing: Theme.Space.snug) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(.secondary)
             TextField("Filter", text: $query)
                 .textFieldStyle(.plain)
                 .font(Theme.Font.body)
@@ -135,6 +148,12 @@ struct InboxView: View {
                         return .handled
                     case .delete where press.modifiers.contains(.command):
                         decideFocused(false)
+                        return .handled
+                    case .init("l") where press.modifiers.contains(.command):
+                        if case .session(let s)? = focusedRow { Linear.open(s.issue) }
+                        return .handled
+                    case .init("t") where press.modifiers.contains(.command):
+                        if case .session(let s)? = focusedRow { Terminal.reveal(pid: s.pid) }
                         return .handled
                     case .init("1"), .init("2"), .init("3"), .init("4"), .init("5"),
                          .init("6"), .init("7"), .init("8"), .init("9"):
@@ -162,30 +181,37 @@ struct InboxView: View {
             if !query.isEmpty {
                 Button { query = ""; cursor = 0 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.quaternary)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
             }
             Text(shortcutHint)
-                .font(.system(size: 9))
-                .foregroundStyle(.quaternary)
+                .font(Theme.Font.micro)
+                .foregroundStyle(.tertiary)
         }
-        .padding(.horizontal, Theme.Space.wide)
-        .padding(.bottom, Theme.Space.step)
+        .padding(.horizontal, Theme.Space.step)
+        .frame(height: 28)
+        // The search field every Mac app has: a quiet fill, no border, the
+        // magnifier inside it.
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
+                .fill(.primary.opacity(0.06)))
+        .padding(.horizontal, Theme.Space.gap)
+        .padding(.bottom, Theme.Space.gap)
     }
 
     /// Only ever names what the focused row can actually do.
     private var shortcutHint: String {
         guard let id = focusedID, let row = visible.first(where: { $0.id == id }) else { return "" }
         if case .pending = row { return "⌘↵ approve · ⌘⌫ deny" }
-        return "↵ open"
+        if case .session(let s) = row, Linear.url(for: s.issue) != nil { return "↵ open · ⌘L Linear · ⌘T terminal" }
+        return "↵ open · ⌘T terminal"
     }
 
     private var list: some View {
         ScrollViewReader { scroller in
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Space.gap) {
+            VStack(alignment: .leading, spacing: Theme.Space.wide) {
                 section(.waiting, rows(in: .waiting))
                 section(.answered, rows(in: .answered))
                 section(.running, rows(in: .running))
@@ -193,19 +219,25 @@ struct InboxView: View {
                 // what "what just landed" needs; the rest is a log.
                 section(.finished, Array(rows(in: .finished).prefix(5)))
                 if visible.isEmpty, !query.isEmpty {
-                    Text("Nothing matches “\(query)”")
+                    Text("No Results for “\(query)”")
                         .font(Theme.Font.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Theme.Space.room)
                 }
             }
             .padding(.horizontal, Theme.Space.gap)
-            .padding(.vertical, Theme.Space.gap)
+            .padding(.top, Theme.Space.tight)
+            .padding(.bottom, Theme.Space.gap)
             // Fill the panel, do not restate its width: this stack carries the
             // horizontal padding, so naming the same number here makes it wider
             // than its own parent.
             .frame(maxWidth: .infinity, alignment: .leading)
+            // A session that gets an answer moves from Running to Answered; it
+            // should be seen to move, or the list just reshuffles under the eye.
+            // Not while filtering: there the list has to keep up with the keys, and
+            // an animation per keystroke is a list that is always catching up.
+            .animation(query.isEmpty ? Theme.expand : nil, value: visible.map { $0.id + $0.state.rawValue })
             .measureHeight(into: $contentHeight)
         }
         .scrollIndicators(.never)
@@ -251,27 +283,70 @@ struct InboxView: View {
         if !rows.isEmpty {
             VStack(alignment: .leading, spacing: Theme.Space.snug) {
                 HStack(spacing: Theme.Space.snug) {
-                    Text(group.title.uppercased())
+                    Text(group.title)
                         .font(Theme.Font.section)
-                        .tracking(0.9)
-                        .foregroundStyle(group == .waiting
-                                         ? AnyShapeStyle(Color.yellow.opacity(0.9))
-                                         : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                        .foregroundStyle(.secondary)
                     Text("\(rows.count)")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.quaternary)
+                        .font(Theme.Font.caption)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
                     Spacer()
                 }
-                .padding(.leading, Theme.Space.tight)
+                .padding(.leading, Theme.Space.gap)
 
-                VStack(spacing: Theme.Space.tight) {
-                    ForEach(rows) { row in
+                // One platter per group with hairlines between rows, the way
+                // System Settings and every grouped list on the Mac is drawn. A
+                // border around each row made a column of boxes; the wash behind
+                // the blocked ones made it a dashboard.
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         RowCard(row: row, store: store, focused: focusedID == row.id)
                             .id(row.id)
+                        if index < rows.count - 1 {
+                            Divider().padding(.leading, RowCard.textInset)
+                        }
                     }
+                }
+                .background(Platter())
+            }
+        }
+    }
+}
+
+/// Someone typing: three dots, lit in turn.
+///
+/// The system's own repeating symbol effect draws this, and redraws it every
+/// frame for as long as the view exists — panel open or not. Three running rows
+/// held a third of a core at rest and made the filter field lag under it. This
+/// one steps twice a second, and stops when nobody is looking.
+private struct TypingDots: View {
+    let running: Bool
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: running ? 0.45 : 3600)) { context in
+            let step = running ? Int(context.date.timeIntervalSinceReferenceDate / 0.45) % 3 : 1
+            HStack(spacing: 2.5) {
+                ForEach(0..<3, id: \.self) { index in
+                    Circle()
+                        .fill(Color.accentColor.opacity(index == step ? 1 : 0.35))
+                        .frame(width: 4, height: 4)
                 }
             }
         }
+    }
+}
+
+/// The surface a group of rows sits on. Lighter than what is behind it in both
+/// appearances, which is how the system draws a grouped list: white on a light
+/// window, a lift of a few percent on a dark one. A grey-on-grey fill read as a
+/// disabled control in light mode.
+private struct Platter: View {
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.platter, style: .continuous)
+            .fill(scheme == .dark ? Color.white.opacity(0.06) : Color.white.opacity(0.6))
     }
 }
 
@@ -280,32 +355,20 @@ struct InboxView: View {
 private struct Header: View {
     @Bindable var store: InboxStore
     @Binding var composing: Bool
-    @State private var hoveringQuit = false
 
     var body: some View {
-        HStack(spacing: Theme.Space.step) {
+        HStack(spacing: Theme.Space.tight) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("Claude Inbox")
                     .font(Theme.Font.title)
                 Text(summary)
-                    .font(Theme.Font.micro)
-                    .foregroundStyle(.tertiary)
+                    .font(Theme.Font.caption)
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+                    .animation(Theme.expand, value: summary)
             }
 
             Spacer(minLength: Theme.Space.gap)
-
-            // One paragraph for a dozen sessions. The question nobody can answer
-            // by reading rows one at a time.
-            IconButton(symbol: store.working ? "hourglass" : "sparkles",
-                       help: "What happened while you were away") {
-                store.summarise()
-            }
-            .disabled(store.working)
-
-            IconButton(symbol: composing ? "xmark" : "plus",
-                       help: "Start a session without a terminal") {
-                withAnimation(Theme.expand) { composing.toggle() }
-            }
 
             if let usage = store.usage.first {
                 HStack(spacing: Theme.Space.snug) {
@@ -313,24 +376,39 @@ private struct Header: View {
                     UsageRing(label: "7d", percentage: usage.rateLimits?.sevenDay?.usedPercentage)
                 }
                 .help("Rate limits. They only move while a session is talking.")
+                .padding(.trailing, Theme.Space.tight)
             }
 
-            Button {
-                NSApplication.shared.terminate(nil)
+            // One paragraph for a dozen sessions. The question nobody can answer
+            // by reading rows one at a time.
+            IconButton(symbol: store.working ? "hourglass" : "sparkles",
+                       help: "What Happened While You Were Away") {
+                store.summarise()
+            }
+            .disabled(store.working)
+
+            IconButton(symbol: composing ? "xmark" : "plus",
+                       help: "New Session") {
+                withAnimation(Theme.expand) { composing.toggle() }
+            }
+
+            // Quit lives where a Mac app keeps it: in a menu, not on a power
+            // button nobody expects to find in a panel.
+            Menu {
+                Button("Quit Claude Inbox") { NSApplication.shared.terminate(nil) }
+                    .keyboardShortcut("q")
             } label: {
-                Image(systemName: "power")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(hoveringQuit ? AnyShapeStyle(Color.primary)
-                                                  : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 26, height: 26)
             }
-            .buttonStyle(.plain)
-            .help("Quit Claude Inbox")
-            .onHover { hovering in
-                withAnimation(Theme.hover) { hoveringQuit = hovering }
-            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
         }
         .padding(.horizontal, Theme.Space.wide)
-        .padding(.vertical, Theme.Space.gap)
+        .padding(.top, Theme.Space.wide)
+        .padding(.bottom, Theme.Space.gap)
     }
 
     /// The one line that answers "what is the state of everything" without
@@ -340,27 +418,29 @@ private struct Header: View {
         if !store.waiting.isEmpty { parts.append("\(store.waiting.count) waiting") }
         if !store.answered.isEmpty { parts.append("\(store.answered.count) answered") }
         if !store.running.isEmpty { parts.append("\(store.running.count) running") }
-        return parts.isEmpty ? "all quiet" : parts.joined(separator: " · ")
+        return parts.isEmpty ? "All quiet" : parts.joined(separator: " · ")
     }
 }
 
-/// A small square button, for the things the header does.
+/// A symbol button, for the things the header does: the toolbar button every Mac
+/// window has — a bare symbol that gains a quiet rounded fill under the pointer.
 private struct IconButton: View {
     let symbol: String
     let help: String
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.isEnabled) private var enabled
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(hovering ? AnyShapeStyle(Color.primary)
-                                          : AnyShapeStyle(HierarchicalShapeStyle.secondary))
-                .frame(width: 22, height: 22)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(enabled ? .primary : .tertiary)
+                .frame(width: 26, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                        .fill(.primary.opacity(hovering ? 0.1 : 0.05)))
+                        .fill(.primary.opacity(hovering && enabled ? 0.09 : 0)))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
@@ -443,9 +523,8 @@ private struct DigestBanner: View {
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Space.step) {
             Image(systemName: store.problem == nil ? "sparkles" : "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
                 .foregroundStyle(store.problem == nil ? Color.accentColor : .orange)
-                .padding(.top, 1)
+                .padding(.top, 2)
             if let problem = store.problem {
                 Text(problem)
                     .font(Theme.Font.caption)
@@ -455,11 +534,14 @@ private struct DigestBanner: View {
                 MarkdownView(text: digest)
             }
             Spacer(minLength: Theme.Space.step)
-            IconButton(symbol: "xmark", help: "Dismiss") { store.clearDigest() }
+            Button { store.clearDigest() } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
         }
         .padding(.horizontal, Theme.Space.wide)
         .padding(.vertical, Theme.Space.gap)
-        .background(Color.accentColor.opacity(store.problem == nil ? 0.07 : 0))
     }
 }
 
@@ -472,105 +554,148 @@ private struct RowCard: View {
     @Bindable var store: InboxStore
     var focused = false
     @State private var hovering = false
+    @State private var answerHeight: CGFloat = 0
+    @State private var draft = ""
+    private static let answerMax: CGFloat = 380
 
     private var isOpen: Bool { store.openRowID == row.id }
     private var isBlocked: Bool { row.state.isBlocked }
 
+    private var session: SessionRecord? {
+        if case .session(let s) = row { return s } else { return nil }
+    }
+    private var unread: Bool { session?.unread ?? false }
+    private var issueURL: URL? { Linear.url(for: session?.issue) }
+    /// Ten minutes is where "it will get to me" becomes "it has been sitting".
+    private var overdue: Bool { isBlocked && Date().timeIntervalSince1970 - row.ts > 600 }
+
     private var project: String {
         switch row {
         case .pending(let p): Format.projectName(cwd: p.cwd, fallback: p.sessionId, name: nil)
-        case .session(let s): Format.projectName(cwd: s.cwd, fallback: s.sessionId, name: s.name)
+        case .session(let s): Format.label(s)
         }
     }
 
     private var subject: String {
         switch row {
         case .pending(let p): Format.askPhrase(p)
-        // A dialog the terminal owns says what it wants; that beats what we infer.
-        case .session(let s): s.waitingFor ?? Format.subject(s)
+        case .session(let s): Format.headline(s)
         }
     }
+
+    /// Everything a row can do, on the right click a Mac user reaches for first.
+    @ViewBuilder
+    private var menu: some View {
+        if let s = session {
+            if let issueURL {
+                Button("Open \(s.issue ?? "Issue") in Linear") { NSWorkspace.shared.open(issueURL) }
+            }
+            if s.pid != nil {
+                Button("Go to Terminal") { Terminal.reveal(pid: s.pid) }
+            }
+            Divider()
+            if let answer = s.lastMessage, !answer.isEmpty {
+                Button("Copy Answer") { copy(answer) }
+            }
+            Button("Copy Resume Command") { copy("claude --resume \(s.sessionId)") }
+            if let issue = s.issue { Button("Copy \(issue)") { copy(issue) } }
+            if let cwd = s.cwd {
+                Button("Show in Finder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: cwd) }
+            }
+            // A generated name is a guess; this is where a person overrules it.
+            if s.issue == nil {
+                Divider()
+                Button("Rename…") { rename(s) }
+            }
+        }
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private func rename(_ s: SessionRecord) {
+        let alert = NSAlert()
+        alert.messageText = "Rename Session"
+        alert.informativeText = "Shown in the panel, in banners and in the digest."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.stringValue = Format.label(s)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        if alert.runModal() == .alertFirstButtonReturn { store.rename(s.sessionId, to: field.stringValue) }
+    }
+
+    /// Where a row's text starts, which is also where the hairline under it does.
+    static let textInset: CGFloat = Theme.Space.gap + 20 + Theme.Space.step
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             head
             if isOpen { details }
         }
-        .background(background)
-        .overlay(alignment: .leading) {
-            // A blocked row is the only thing in this panel that is *about* you.
-            // The accent says so before any word is read.
-            if isBlocked {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(row.state.tint)
-                    .frame(width: 3)
-                    .padding(.vertical, Theme.Space.step)
-                    .padding(.leading, Theme.Space.tight)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .background(highlight)
         .contentShape(Rectangle())
         .onTapGesture {
             withAnimation(Theme.expand) { store.open(isOpen ? nil : row) }
         }
+        .contextMenu { menu }
         .onHover { value in
             withAnimation(Theme.hover) { hovering = value }
         }
     }
 
-    private var background: some View {
-        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-            .fill(isBlocked
-                  ? AnyShapeStyle(row.state.tint.opacity(hovering ? 0.18 : 0.13))
-                  : AnyShapeStyle(Color.primary.opacity(hovering || isOpen ? 0.085 : 0.05)))
-            .overlay(
-                // A hairline is what separates a card from a wash. Without it a
-                // column of fills reads as one grey block with text in it. The
-                // keyboard's position gets a brighter one, because "where am I"
-                // has to be answerable without moving the mouse.
-                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                    .strokeBorder(
-                        focused ? Color.accentColor.opacity(0.85)
-                            : isBlocked ? row.state.tint.opacity(0.3)
-                            : Color.primary.opacity(0.07),
-                        lineWidth: focused ? 1.5 : 0.5))
+    /// The highlight a Mac list draws: a rounded fill inside the platter, quiet
+    /// under the pointer and a step stronger where the keyboard is. No border, no
+    /// tint — the state is the symbol's job, and a blocked row does not need a
+    /// wash behind it to be the first thing in the panel.
+    private var highlight: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.row, style: .continuous)
+            .fill(.primary.opacity(isOpen ? 0.04 : focused ? 0.09 : hovering ? 0.05 : 0))
+            .padding(Theme.Space.tight)
     }
 
     private var head: some View {
-        HStack(alignment: .top, spacing: Theme.Space.step) {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.step) {
             glyph
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: Theme.Space.snug) {
-                    // Which session this is. The cheapest question on the card,
-                    // so it takes the smallest type on it.
-                    Text(project.uppercased())
-                        .font(Theme.Font.eyebrow)
-                        .tracking(0.4)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Space.snug) {
+                    // Which session this is, set the way a mail row sets its
+                    // sender: it is what the eye finds first going down a list.
+                    if isOpen, let issueURL {
+                        // Open, the key is the way to the issue itself.
+                        Button(project) { NSWorkspace.shared.open(issueURL) }
+                            .buttonStyle(.link)
+                            .font(Theme.Font.label)
+                            .help("Open in Linear  ⌘L")
+                    } else {
+                        Text(project)
+                            .font(Theme.Font.label)
+                            .lineLimit(1)
+                    }
                     if case .session(let s) = row, let phase = s.phase {
                         Text(phase)
-                            .font(.system(size: 9, weight: .bold))
-                            .tracking(0.3)
-                            .foregroundStyle(row.state.tint.opacity(0.9))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(
-                                RoundedRectangle(cornerRadius: Theme.Radius.pill, style: .continuous)
-                                    .fill(row.state.tint.opacity(0.14)))
+                            .font(Theme.Font.micro.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1.5)
+                            .background(Capsule(style: .continuous).fill(.primary.opacity(0.08)))
                     }
                     Spacer(minLength: Theme.Space.tight)
                     Text(Format.age(row.ts))
-                        .font(Theme.Font.micro)
-                        .foregroundStyle(.quaternary)
+                        .font(overdue ? Theme.Font.caption.weight(.semibold) : Theme.Font.caption)
+                        .foregroundStyle(overdue ? AnyShapeStyle(Color.orange) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
                         .monospacedDigit()
                 }
-                // The headline: what is going on. The first version gave this
-                // less weight than the project name, so every card led with the
-                // least interesting thing on it.
+                // What it says. A row that wants something, or has an answer to
+                // read, is set in the primary colour; one that is only running is
+                // weather, and recedes.
                 Text(subject)
-                    .font(Theme.Font.subject)
-                    .foregroundStyle(.primary)
+                    .font(unread ? Theme.Font.subject.weight(.medium) : Theme.Font.subject)
+                    .foregroundStyle(row.state.group == .running || (row.state.group == .answered && !unread)
+                                     ? .secondary : .primary)
                     .lineLimit(isOpen ? 5 : 2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -580,26 +705,39 @@ private struct RowCard: View {
             }
         }
         .padding(.horizontal, Theme.Space.gap)
-        .padding(.vertical, Theme.Space.snug + 1)
-        .padding(.leading, isBlocked ? Theme.Space.tight : 0)
+        .padding(.vertical, Theme.Space.step + 1)
     }
 
+    /// The state, as a symbol in the state's colour and nothing else: no tile, no
+    /// wash. Each one is a sign the Mac already uses for the same thing — the
+    /// three dots of someone typing for a session at work, the blue dot of an
+    /// unread message for an answer nobody has opened.
     private var glyph: some View {
-        Image(systemName: row.state.symbol)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(row.state.tint)
-            .frame(width: 22, height: 22)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                    .fill(row.state.tint.opacity(0.14)))
-            .padding(.top, 1)
+        Group {
+            if row.state == .working {
+                TypingDots(running: store.panelVisible)
+            } else if unread {
+                Circle().fill(Color.accentColor).frame(width: 9, height: 9)
+            } else {
+                // The mark in white on the state's colour, the way the system
+                // draws a badge; a hierarchical triangle came out as a brown wash.
+                Image(systemName: row.state == .idle ? "bubble.left" : row.state.symbol)
+                    .font(.system(size: 14, weight: .regular))
+                    .symbolRenderingMode(isBlocked ? .palette : .hierarchical)
+                    .foregroundStyle(isBlocked ? AnyShapeStyle(.white) : AnyShapeStyle(row.state.tint),
+                                     AnyShapeStyle(row.state.tint))
+                    // A row that has just started needing you says so once.
+                    .symbolEffect(.bounce, value: isBlocked ? row.ts : 0)
+            }
+        }
+        .frame(width: 20, alignment: .center)
+        .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
     }
 
     private var decision: some View {
         HStack(spacing: Theme.Space.snug) {
             Button("Approve") { store.decide(row, allow: true) }
                 .buttonStyle(.borderedProminent)
-                .tint(row.state.tint)
             Button("Deny") { store.decide(row, allow: false) }
                 .buttonStyle(.bordered)
             Spacer()
@@ -610,18 +748,18 @@ private struct RowCard: View {
 
     @ViewBuilder
     private var details: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.step) {
-            Divider().opacity(0.4)
-
+        VStack(alignment: .leading, spacing: Theme.Space.gap) {
             if case .pending(let item) = row { ask(for: item) }
 
             if case .session(let s) = row {
                 if let asked = Format.userPrompt(s.lastPrompt) {
+                    // What was asked, set as a quotation — the way Mail sets the
+                    // message being replied to.
                     HStack(alignment: .top, spacing: Theme.Space.step) {
-                        RoundedRectangle(cornerRadius: 1).fill(.quaternary).frame(width: 2)
+                        RoundedRectangle(cornerRadius: 1).fill(.tertiary).frame(width: 2)
                         Text(Format.oneLine(asked))
-                            .font(Theme.Font.caption)
-                            .foregroundStyle(.tertiary)
+                            .font(Theme.Font.subject)
+                            .foregroundStyle(.secondary)
                             .lineLimit(3)
                     }
                 }
@@ -630,53 +768,87 @@ private struct RowCard: View {
                 if let answer = store.narration ?? s.lastMessage, !answer.isEmpty {
                     ScrollView {
                         MarkdownView(text: answer)
+                            .measureHeight(into: $answerHeight)
                     }
                     .scrollIndicators(.never)
-                    .frame(maxHeight: 300)
+                    .frame(maxHeight: Self.answerMax)
+                    // An answer longer than its window fades out at the bottom —
+                    // "there is more" — instead of being cut through a line.
+                    .mask(
+                        LinearGradient(
+                            stops: [.init(color: .black, location: 0),
+                                    .init(color: .black, location: answerHeight > Self.answerMax ? 0.88 : 1),
+                                    .init(color: answerHeight > Self.answerMax ? .clear : .black, location: 1)],
+                            startPoint: .top, endPoint: .bottom))
                 }
                 if !store.activity.isEmpty {
-                    VStack(alignment: .leading, spacing: 2) {
+                    // These are sentences now — the model's own description of
+                    // each command — so they are set as text, not as a log.
+                    VStack(alignment: .leading, spacing: 3) {
                         ForEach(store.activity.prefix(4), id: \.self) { line in
                             Text(line)
-                                .font(Theme.Font.monoSmall)
-                                .foregroundStyle(.quaternary)
+                                .font(Theme.Font.caption)
+                                .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                     }
                 }
             }
 
+            replies
             composer
             footer
         }
-        .padding(.horizontal, Theme.Space.gap)
+        // The full width of the card, not the column under the label: an answer
+        // is read, and thirty points of indent cost it a sixth of every line.
+        .padding(.horizontal, Theme.Space.wide)
+        .padding(.top, Theme.Space.tight)
         .padding(.bottom, Theme.Space.gap)
-        .padding(.leading, isBlocked ? Theme.Space.tight : 0)
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        .transition(.opacity)
     }
 
     private var footer: some View {
-        HStack(spacing: Theme.Space.step) {
+        HStack(spacing: Theme.Space.gap) {
             if let cwd = row.cwd {
                 Text(Format.shortPath(cwd))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.quaternary)
+                    .font(Theme.Font.micro)
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.head)
+                    .layoutPriority(-1)
             }
             Spacer(minLength: Theme.Space.step)
             // The way back into a session without hunting for the window it
             // started in.
-            CopyButton(text: "claude --resume \(row.sessionId)", label: "Resume")
-            if let cwd = row.cwd {
-                Button {
-                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: cwd)
-                } label: {
-                    Text("Folder").font(.system(size: 9.5, weight: .medium))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tertiary)
+            CopyButton(text: "claude --resume \(row.sessionId)", label: "Copy Resume Command")
+                .fixedSize()
+            if let pid = session?.pid {
+                Button("Go to Terminal") { Terminal.reveal(pid: pid) }
+                    .buttonStyle(.link)
+                    .font(Theme.Font.caption)
+                    .fixedSize()
+                    .help("Bring the session's terminal forward  ⌘T")
             }
+        }
+    }
+
+    /// The answers a person is most likely to give, one tap from the draft. A
+    /// tap fills the field and stops there: an approval sent by a stray click is
+    /// a decision nobody made.
+    @ViewBuilder
+    private var replies: some View {
+        if let s = session, !s.replies.isEmpty, let pid = s.pid, Peer.canReach(pid: pid) {
+            ScrollView(.horizontal) {
+                HStack(spacing: Theme.Space.snug) {
+                    ForEach(s.replies, id: \.self) { reply in
+                        Button(reply) { draft = reply }
+                            .buttonStyle(.bordered)
+                            .buttonBorderShape(.capsule)
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .scrollIndicators(.never)
         }
     }
 
@@ -684,7 +856,7 @@ private struct RowCard: View {
     @ViewBuilder
     private var composer: some View {
         if case .session(let s) = row, let pid = s.pid, Peer.canReach(pid: pid) {
-            Composer(pid: pid, permissionMode: s.permissionMode, onSent: { store.reload() })
+            Composer(pid: pid, permissionMode: s.permissionMode, text: $draft, onSent: { store.reload() })
         }
     }
 
@@ -704,19 +876,18 @@ private struct RowCard: View {
                 .padding(Theme.Space.step)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                        .fill(.black.opacity(0.22)))
+                    RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
+                        .fill(.primary.opacity(0.06)))
         } else if let path = item.toolInput?["file_path"]?.stringValue {
             HStack(spacing: Theme.Space.snug) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                 Text(path.split(separator: "/").last.map(String.init) ?? path)
                     .font(Theme.Font.mono)
                     .textSelection(.enabled)
                 Text(Format.shortPath((path as NSString).deletingLastPathComponent))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.quaternary)
+                    .font(Theme.Font.micro)
+                    .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.head)
                 Spacer(minLength: 0)
@@ -725,8 +896,8 @@ private struct RowCard: View {
             .padding(.vertical, Theme.Space.snug)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                    .fill(.black.opacity(0.22)))
+                RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
+                    .fill(.primary.opacity(0.06)))
         }
     }
 
@@ -743,9 +914,9 @@ private struct RowCard: View {
 private struct Composer: View {
     let pid: Int
     let permissionMode: String?
+    @Binding var text: String
     let onSent: () -> Void
 
-    @State private var text = ""
     @State private var problem: String?
     @State private var sent = false
     @State private var held = false
@@ -761,27 +932,30 @@ private struct Composer: View {
                     .focused($focused)
                     .onSubmit(send)
                 Button(action: send) {
-                    Image(systemName: sent ? "checkmark" : "arrow.up.circle.fill")
-                        .font(.system(size: 15))
+                    Image(systemName: sent ? "checkmark.circle.fill" : "arrow.up.circle.fill")
+                        .font(.system(size: 20))
+                        .symbolRenderingMode(.hierarchical)
                         .foregroundStyle(sent ? AnyShapeStyle(Color.green)
-                                              : AnyShapeStyle(text.isEmpty ? AnyShapeStyle(HierarchicalShapeStyle.quaternary)
+                                              : AnyShapeStyle(text.isEmpty ? AnyShapeStyle(HierarchicalShapeStyle.tertiary)
                                                                            : AnyShapeStyle(Color.accentColor)))
                 }
                 .buttonStyle(.plain)
                 .disabled(text.isEmpty)
             }
-            .padding(.horizontal, Theme.Space.step)
-            .padding(.vertical, Theme.Space.snug)
+            .padding(.leading, Theme.Space.gap)
+            .padding(.trailing, 5)
+            .padding(.vertical, 5)
+            // The field Messages has: a hairline capsule with the send button
+            // inside it, and the system's own focus colour when it is live.
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                    .fill(.primary.opacity(0.06))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                            .strokeBorder(focused ? Color.accentColor.opacity(0.5) : .clear, lineWidth: 1)))
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(focused ? AnyShapeStyle(Color.accentColor.opacity(0.7))
+                                          : AnyShapeStyle(Color(nsColor: .separatorColor)),
+                                  lineWidth: 1))
 
             if let problem {
                 Text(problem)
-                    .font(.system(size: 9.5))
+                    .font(Theme.Font.micro)
                     .foregroundStyle(.orange)
             } else if held {
                 // Saying this after the fact would be worse than not saying it:
@@ -789,24 +963,24 @@ private struct Composer: View {
                 // message is a trip to the terminal with extra steps.
                 HStack(alignment: .top, spacing: Theme.Space.snug) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 9))
+                        .font(Theme.Font.micro)
                         .foregroundStyle(.orange)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("This session bypasses prompts, so Claude Code parks notes from outside it. You would have to release this one in the terminal.")
-                            .font(.system(size: 9.5))
+                            .font(Theme.Font.micro)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
-                        Button("Deliver them instead") { accept() }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(Color.accentColor)
+                        Button("Deliver Them Instead") { accept() }
+                            .buttonStyle(.link)
+                            .font(Theme.Font.micro)
                             .help("Sets crossSessionInbound to \"accept\". Anything on this machine running as you could then steer a bypassing session. Your settings.json is backed up first.")
                     }
                 }
             } else {
                 Text("Arrives as a message from a peer session, not as you.")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.quaternary)
+                    .font(Theme.Font.micro)
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, Theme.Space.gap)
             }
         }
         .onAppear { held = Settings.willHold(permissionMode: permissionMode) }
@@ -855,39 +1029,28 @@ private struct CopyButton: View {
             }
         } label: {
             Text(copied ? "Copied" : label)
-                .font(.system(size: 9.5, weight: .medium))
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(copied ? AnyShapeStyle(Color.green)
-                                : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+        .buttonStyle(.link)
+        .font(Theme.Font.caption)
     }
 }
 
 // MARK: - Furniture
 
+/// The system's own empty state, so that "nothing here" looks the way it does in
+/// Mail, in Finder and in every other window on the machine.
 private struct Placeholder: View {
     let symbol: String
-    let tint: Color
     let title: String
     let detail: String
 
     var body: some View {
-        VStack(spacing: Theme.Space.step) {
-            Image(systemName: symbol)
-                .font(.system(size: 26, weight: .light))
-                .foregroundStyle(tint.opacity(0.85))
-            Text(title)
-                .font(Theme.Font.body.weight(.medium))
-            if !detail.isEmpty {
-                Text(detail)
-                    .font(Theme.Font.caption)
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-            }
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
+            if !detail.isEmpty { Text(detail) }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Theme.Space.room * 2)
-        .padding(.horizontal, Theme.Space.room)
+        .padding(.vertical, Theme.Space.room)
     }
 }
 
@@ -897,13 +1060,13 @@ private struct Footer: View {
     var body: some View {
         HStack(spacing: Theme.Space.snug) {
             Text(line)
-                .font(.system(size: 9.5))
-                .foregroundStyle(.quaternary)
+                .font(Theme.Font.micro)
+                .foregroundStyle(.tertiary)
             Spacer()
             if let cost = usage.cost?.totalCostUsd, cost > 0 {
                 Text(String(format: "$%.2f", cost))
-                    .font(.system(size: 9.5))
-                    .foregroundStyle(.quaternary)
+                    .font(Theme.Font.micro)
+                    .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
         }

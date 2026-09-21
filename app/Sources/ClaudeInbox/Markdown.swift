@@ -146,13 +146,22 @@ enum Markdown {
 
     /// Emphasis, code spans and links, which SwiftUI does handle.
     static func inline(_ text: String) -> AttributedString {
-        (try? AttributedString(
+        var out = (try? AttributedString(
             markdown: text,
             options: .init(
                 allowsExtendedAttributes: true,
                 interpretedSyntax: .inlineOnlyPreservingWhitespace,
                 failurePolicy: .returnPartiallyParsedIfPossible)))
             ?? AttributedString(text)
+        // A code span set at the size of the words around it is wider and darker
+        // than they are, and a paragraph with four of them stops being a
+        // paragraph. A point smaller and on a faint ground, it reads as a name
+        // inside a sentence, which is what it is.
+        for run in out.runs where run.inlinePresentationIntent?.contains(.code) == true {
+            out[run.range].font = .system(size: 11, design: .monospaced)
+            out[run.range].backgroundColor = Color.primary.opacity(0.07)
+        }
+        return out
     }
 }
 
@@ -160,7 +169,7 @@ enum Markdown {
 struct MarkdownView: View {
     let text: String
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.step) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(Markdown.parse(text)) { block in
                 view(for: block)
             }
@@ -173,13 +182,13 @@ struct MarkdownView: View {
         switch block {
         case .heading(let level, let text):
             Text(Markdown.inline(text))
-                .font(.system(size: level <= 2 ? 13 : 12, weight: .bold))
-                .padding(.top, Theme.Space.tight)
+                .font(level <= 2 ? Theme.Font.label : Theme.Font.reading.weight(.semibold))
+                .padding(.top, Theme.Space.snug)
 
         case .paragraph(let text):
             Text(Markdown.inline(text))
-                .font(Theme.Font.body)
-                .lineSpacing(2.5)
+                .font(Theme.Font.reading)
+                .lineSpacing(Theme.leading)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -187,9 +196,8 @@ struct MarkdownView: View {
             VStack(alignment: .leading, spacing: 3) {
                 if let language {
                     Text(language)
-                        .font(.system(size: 8.5, weight: .semibold))
-                        .tracking(0.5)
-                        .foregroundStyle(.quaternary)
+                        .font(Theme.Font.micro)
+                        .foregroundStyle(.tertiary)
                 }
                 Text(text)
                     .font(Theme.Font.mono)
@@ -199,20 +207,24 @@ struct MarkdownView: View {
             .padding(Theme.Space.step)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
-                    .fill(.black.opacity(0.24)))
+                RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
+                    .fill(.primary.opacity(0.06)))
 
         case .list(let items, let ordered):
-            VStack(alignment: .leading, spacing: 3) {
+            // Items are paragraphs of their own here — a ticket and what happened
+            // to it — so they are spaced as paragraphs. Three points apart they
+            // ran together into one block with dots in it.
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     HStack(alignment: .firstTextBaseline, spacing: Theme.Space.snug) {
                         Text(ordered ? "\(index + 1)." : "•")
-                            .font(Theme.Font.body)
-                            .foregroundStyle(.quaternary)
-                            .frame(minWidth: 12, alignment: .trailing)
+                            .font(Theme.Font.reading)
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 10, alignment: .trailing)
                         Text(Markdown.inline(item))
-                            .font(Theme.Font.body)
-                            .lineSpacing(2)
+                            .font(Theme.Font.reading)
+                            .lineSpacing(Theme.leading)
+                            .textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -220,9 +232,10 @@ struct MarkdownView: View {
 
         case .quote(let text):
             HStack(alignment: .top, spacing: Theme.Space.step) {
-                RoundedRectangle(cornerRadius: 1).fill(.quaternary).frame(width: 2)
+                RoundedRectangle(cornerRadius: 1).fill(.tertiary).frame(width: 2)
                 Text(Markdown.inline(text))
-                    .font(Theme.Font.body)
+                    .font(Theme.Font.reading)
+                    .lineSpacing(Theme.leading)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -231,7 +244,7 @@ struct MarkdownView: View {
             TableBlock(header: header, rows: rows)
 
         case .rule:
-            Divider().opacity(0.35)
+            Divider()
         }
     }
 }
@@ -252,9 +265,8 @@ private struct TableBlock: View {
                 GridRow {
                     ForEach(0..<columns, id: \.self) { column in
                         Text(Markdown.inline(header.indices.contains(column) ? header[column] : ""))
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(0.3)
-                            .foregroundStyle(.tertiary)
+                            .font(Theme.Font.micro.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                 }
                 Divider().opacity(0.3).gridCellColumns(columns)

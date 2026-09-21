@@ -17,32 +17,43 @@ enum Theme {
         static let room: CGFloat = 24
     }
 
+    /// Concentric, the way the system draws them: a platter, the highlight that
+    /// sits inside it, and the controls that sit inside that.
     enum Radius {
-        static let card: CGFloat = 10
-        static let chip: CGFloat = 7
-        static let pill: CGFloat = 5
+        static let platter: CGFloat = 12
+        static let row: CGFloat = 8
+        static let field: CGFloat = 8
+        static let chip: CGFloat = 6
     }
 
-    /// The scale is narrow on purpose. Hierarchy comes from weight and colour,
-    /// because five type sizes in a 460pt panel reads as five different apps.
+    /// The system's own text styles, not point sizes. They are the sizes every
+    /// other panel on the machine is set in — 13 for what you read, 11 for what
+    /// goes with it, 10 for what you glance at — and they are what makes a panel
+    /// read as part of the Mac rather than as a page drawn on top of it.
+    /// Hierarchy comes from weight and from `primary` / `secondary` / `tertiary`,
+    /// never from a colour of our own.
     enum Font {
-        static let title = SwiftUI.Font.system(size: 13, weight: .bold)
-        /// The project. Small and quiet on purpose — it says *which*, and which is
-        /// the cheapest question in the panel.
-        static let eyebrow = SwiftUI.Font.system(size: 10.5, weight: .semibold)
-        /// What the session is about. This is the content, so it is the headline:
-        /// the first version had it a size smaller than the project name, which
-        /// made every card lead with the least interesting thing on it.
-        static let subject = SwiftUI.Font.system(size: 12.5, weight: .medium)
-        static let body = SwiftUI.Font.system(size: 12, weight: .regular)
-        static let caption = SwiftUI.Font.system(size: 11, weight: .regular)
-        static let micro = SwiftUI.Font.system(size: 10, weight: .medium)
-        static let section = SwiftUI.Font.system(size: 9.5, weight: .bold)
-        static let mono = SwiftUI.Font.system(size: 11, design: .monospaced)
-        static let monoSmall = SwiftUI.Font.system(size: 10, design: .monospaced)
+        static let title = SwiftUI.Font.headline
+        /// Which session this is: the sender line of a mail row.
+        static let label = SwiftUI.Font.body.weight(.semibold)
+        /// What it says: the subject line under it.
+        static let subject = SwiftUI.Font.callout
+        static let body = SwiftUI.Font.body
+        /// Long text, read rather than scanned: an answer, in a column some 400
+        /// points wide. A size down from the body with a third of a line of air
+        /// between lines is about sixty characters a line, which is where a column
+        /// stops being work. At the body size it was forty-five and looked bold.
+        static let reading = SwiftUI.Font.callout
+        static let caption = SwiftUI.Font.subheadline
+        static let micro = SwiftUI.Font.caption
+        static let section = SwiftUI.Font.subheadline.weight(.semibold)
+        static let mono = SwiftUI.Font.system(.callout, design: .monospaced)
     }
 
-    static let panelWidth: CGFloat = 470
+    /// Extra space between the lines of anything in `Font.reading`.
+    static let leading: CGFloat = 4
+
+    static let panelWidth: CGFloat = 440
     static let panelMaxHeight: CGFloat = 640
 
     /// Expanding a card moves everything below it. Without motion that reads as
@@ -114,7 +125,7 @@ extension View {
 struct UsageRing: View {
     let label: String
     let percentage: Double?
-    var size: CGFloat = 20
+    var size: CGFloat = 22
 
     private var fraction: Double { min(1, max(0, (percentage ?? 0) / 100)) }
     private var tint: Color { Theme.usageTint(percentage ?? 0) }
@@ -129,8 +140,8 @@ struct UsageRing: View {
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             Text(label)
-                .font(.system(size: 7.5, weight: .bold))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 8, weight: .semibold))
+                .foregroundStyle(.secondary)
         }
         .frame(width: size, height: size)
         .animation(Theme.expand, value: fraction)
