@@ -208,7 +208,11 @@ struct InboxView: View {
     /// Only ever names what the focused row can actually do.
     private var shortcutHint: String {
         guard let id = focusedID, let row = visible.first(where: { $0.id == id }) else { return "" }
-        if case .pending = row { return "⌘↵ approve · ⌘⌫ deny" }
+        if case .pending(let p) = row {
+            if p.kind == "question" { return "answer below · ⌘⌫ dismiss" }
+            if p.kind == "plan" { return "⌘↵ approve plan · ⌘⌫ reject" }
+            return "⌘↵ approve · ⌘⌫ deny"
+        }
         if case .session(let s) = row, Linear.url(for: s.issue) != nil { return "↵ open · ⌘L Linear · ⌘T terminal" }
         return "↵ open · ⌘T terminal"
     }
@@ -279,7 +283,11 @@ struct InboxView: View {
     private func decideFocused(_ allow: Bool) {
         guard visible.indices.contains(cursor) else { return }
         let row = visible[cursor]
-        guard case .pending = row else { return }
+        guard case .pending(let p) = row else { return }
+        // ⌘↵ on a question would be a decision Claude Code drops; the answer has
+        // to be one of the options.
+        if p.kind == "question", allow { return }
+        if p.kind == "plan", allow { store.approvePlan(row); cursor = min(cursor, max(0, visible.count - 2)); return }
         store.decide(row, allow: allow)
         cursor = min(cursor, max(0, visible.count - 2))
     }
@@ -626,8 +634,8 @@ private struct RowCard: View {
 
     private var subject: String {
         switch row {
-        case .pending(let p): Format.askPhrase(p)
-        case .session(let s): Format.headline(s)
+        case .pending(let p): return Format.askPhrase(p, max: Limits.subject)
+        case .session(let s): return Format.headline(s)
         }
     }
 
@@ -785,27 +793,49 @@ private struct RowCard: View {
         .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
     }
 
+    /// Claude Code says it plainly: for a tool that answers on its own card,
+    /// one-tap Approve must not be offered — a bare allow for it is dropped, so a
+    /// button that looks like it works would do nothing at all.
+    private var answersOnCard: Bool {
+        if case .pending(let p) = row { return p.kind == "question" || p.kind == "plan" }
+        return false
+    }
+
     private var decision: some View {
         HStack(spacing: Theme.Space.snug) {
-            Button("Approve") { store.decide(row, allow: true) }
-                .buttonStyle(.borderedProminent)
-            Button("Deny") { store.decide(row, allow: false) }
-                .buttonStyle(.bordered)
-            // Answering the same question twelve times is the thing worth fixing,
-            // and Claude Code already says what the broader answer would be. A
-            // menu rather than three more buttons: this is the rarer press, and
-            // it is the one you should read before making.
-            if case .pending(let item) = row {
-                let grants = Format.grants(item)
-                if !grants.isEmpty {
-                    Menu("Allow and…") {
-                        ForEach(grants) { grant in
-                            Button(grant.label) { store.decide(row, allow: true, grant: grant) }
+            if case .pending(let p) = row, p.kind == "question" {
+                // Nothing to approve: the options below are the answer. Claude
+                // Code is explicit that a one-tap Approve must not be offered for
+                // a tool that answers on its own card, and a button that looks
+                // like it works while doing nothing is the worst of both.
+                Button("Dismiss") { store.decide(row, allow: false) }
+                    .buttonStyle(.bordered)
+            } else if case .pending(let p) = row, p.kind == "plan" {
+                Button("Approve plan") { store.approvePlan(row) }
+                    .buttonStyle(.borderedProminent)
+                Button("Reject") { store.decide(row, allow: false) }
+                    .buttonStyle(.bordered)
+            } else {
+                Button("Approve") { store.decide(row, allow: true) }
+                    .buttonStyle(.borderedProminent)
+                Button("Deny") { store.decide(row, allow: false) }
+                    .buttonStyle(.bordered)
+                // Answering the same question twelve times is the thing worth
+                // fixing, and Claude Code already says what the broader answer
+                // would be. A menu rather than three more buttons: this is the
+                // rarer press, and the one you should read before making.
+                if case .pending(let item) = row {
+                    let grants = Format.grants(item)
+                    if !grants.isEmpty {
+                        Menu("Allow and…") {
+                            ForEach(grants) { grant in
+                                Button(grant.label) { store.decide(row, allow: true, grant: grant) }
+                            }
                         }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .help("Approve, and let Claude Code stop asking")
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .help("Approve, and let Claude Code stop asking")
                 }
             }
             Spacer()
@@ -951,7 +981,13 @@ private struct RowCard: View {
     /// the directory kept small beside it.
     @ViewBuilder
     private func ask(for item: PendingItem) -> some View {
-        if let command = item.toolInput?["command"]?.stringValue {
+        if item.kind == "question" {
+            QuestionForm(item: item, store: store, row: row)
+        } else if item.kind == "plan", let plan = item.toolInput?["plan"]?.stringValue, !plan.isEmpty {
+            // A plan is read before it is approved, so it is set like an answer
+            // rather than like a command.
+            MarkdownView(text: plan)
+        } else if let command = item.toolInput?["command"]?.stringValue {
             Text(command)
                 .font(Theme.Font.mono)
                 .textSelection(.enabled)
@@ -1200,5 +1236,123 @@ private struct Footer: View {
         parts.append("read \(Format.age(usage.ts))")
         if let model = usage.model { parts.append(model) }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// Answering a question without the terminal.
+///
+/// One tap on an option answers a single-choice question, because that is the
+/// whole point — the round trip this removes is measured in minutes. A
+/// multi-select gathers first and sends once. Free text rides in the same
+/// `answers` map, in the slot Claude Code leaves for it.
+private struct QuestionForm: View {
+    let item: PendingItem
+    @Bindable var store: InboxStore
+    let row: Row
+
+    @State private var chosen: [String: Set<String>] = [:]
+    @State private var typed: [String: String] = [:]
+
+    private var asked: [Format.Asked] { Format.asked(item) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.gap) {
+            ForEach(asked) { q in
+                VStack(alignment: .leading, spacing: Theme.Space.snug) {
+                    // With one question the card's headline already said it.
+                    if asked.count > 1 {
+                        Text(q.question)
+                            .font(Theme.Font.reading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(q.options, id: \.self) { option in
+                        Button {
+                            pick(q, option)
+                        } label: {
+                            HStack(spacing: Theme.Space.snug) {
+                                Image(systemName: mark(q, option))
+                                    .foregroundStyle(picked(q, option) ? AnyShapeStyle(Color.accentColor)
+                                                                       : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                                Text(option)
+                                    .font(Theme.Font.reading)
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    TextField("Something else…", text: binding(for: q), axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(Theme.Font.reading)
+                        .lineLimit(1...4)
+                        .padding(.horizontal, Theme.Space.step)
+                        .padding(.vertical, Theme.Space.snug)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous)
+                                .fill(.primary.opacity(0.06)))
+                        .onSubmit(send)
+                }
+            }
+            // A single choice with nothing typed has already been sent by the tap.
+            if needsSend {
+                Button("Send answer") { send() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(gathered.isEmpty)
+            }
+        }
+    }
+
+    private var needsSend: Bool {
+        asked.contains { $0.multiSelect } || typed.values.contains { !$0.isEmpty }
+    }
+
+    private func picked(_ q: Format.Asked, _ option: String) -> Bool {
+        chosen[q.question]?.contains(option) ?? false
+    }
+
+    private func mark(_ q: Format.Asked, _ option: String) -> String {
+        let on = picked(q, option)
+        if q.multiSelect { return on ? "checkmark.square.fill" : "square" }
+        return on ? "largecircle.fill.circle" : "circle"
+    }
+
+    private func binding(for q: Format.Asked) -> Binding<String> {
+        Binding(get: { typed[q.question] ?? "" }, set: { typed[q.question] = $0 })
+    }
+
+    private func pick(_ q: Format.Asked, _ option: String) {
+        if q.multiSelect {
+            var set = chosen[q.question] ?? []
+            if set.contains(option) { set.remove(option) } else { set.insert(option) }
+            chosen[q.question] = set
+            return
+        }
+        chosen[q.question] = [option]
+        // One question, one choice, nothing typed: the tap was the answer.
+        if asked.count == 1, (typed[q.question] ?? "").isEmpty { send() }
+    }
+
+    /// What the person has actually said, in the order the options were offered
+    /// so a multi-select reads the way it was drawn.
+    private var gathered: [String: [String]] {
+        var out: [String: [String]] = [:]
+        for q in asked {
+            var values = q.options.filter { chosen[q.question]?.contains($0) ?? false }
+            let free = (typed[q.question] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !free.isEmpty {
+                if q.multiSelect { values.append(free) } else { values = [free] }
+            }
+            if !values.isEmpty { out[q.question] = values }
+        }
+        return out
+    }
+
+    private func send() {
+        let answers = gathered
+        guard answers.count == asked.count else { return }  // every question, or none
+        store.answer(row, answers: answers)
     }
 }

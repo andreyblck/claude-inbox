@@ -12,6 +12,9 @@ import { readCommand, readIssue, readSessionSummary, readTurnNarration } from ".
 import {
   bySeverity,
   cleanLabel,
+  answerInput,
+  askPhrase,
+  askedOf,
   grantsOf,
   shortPath,
   headlineOf,
@@ -66,6 +69,64 @@ describe("a path a person can read", () => {
     assert.equal(shortPath("/Users/me/work/acme", "/Users/me"), "~/work/acme");
     assert.equal(shortPath("/private/var/folders/sz/abc/T/tmp.X9/project"), "tmp/tmp.X9/project");
     assert.equal(shortPath("/opt/src", "/Users/me"), "/opt/src");
+  });
+});
+
+describe("answering a question from the panel", () => {
+  const ask = (questions: unknown[]): PendingItem => ({
+    req: "r", kind: "question", state: "blocked.question", ts: 0, session_id: "s",
+    tool_name: "AskUserQuestion", tool_input: { questions },
+  });
+  const one = [{
+    question: "Which one?", header: "Pick", multiSelect: false,
+    options: [{ label: "Red" }, { label: "Blue" }],
+  }];
+
+  it("leads the row with the question, not with how many options it has", () => {
+    assert.equal(askPhrase(ask(one), 200), "Which one?");
+    assert.equal(
+      askPhrase(ask([...one, { question: "And then?", header: "Next", options: [{ label: "X" }] }]), 200),
+      "Which one? (+1 more)",
+    );
+  });
+
+  it("reads the questions out for the form to draw", () => {
+    const qs = askedOf(ask(one));
+    assert.equal(qs.length, 1);
+    assert.deepEqual(qs[0], { question: "Which one?", header: "Pick", multiSelect: false, options: ["Red", "Blue"] });
+  });
+
+  it("echoes the tool's own input and adds the answer, keyed by the question", () => {
+    // Claude Code refuses an updatedInput that changes anything it showed the
+    // person; `answers` is one of the few keys it lets a sender add.
+    const item = ask(one);
+    assert.deepEqual(answerInput(item, { "Which one?": "Blue" }), {
+      questions: one,
+      answers: { "Which one?": "Blue" },
+    });
+  });
+
+  it("takes a list only where the question allows one", () => {
+    const multi = [{ question: "Which ones?", header: "Pick", multiSelect: true, options: [{ label: "A" }, { label: "B" }] }];
+    assert.deepEqual(answerInput(ask(multi), { "Which ones?": ["A", "B"] })?.answers, { "Which ones?": ["A", "B"] });
+    // A single-select question with a list is refused rather than flattened.
+    assert.equal(answerInput(ask(one), { "Which one?": ["Red", "Blue"] }), undefined);
+  });
+
+  it("refuses what Claude Code would refuse, instead of sending it and hoping", () => {
+    assert.equal(answerInput(ask(one), { "No such question": "Red" }), undefined);
+    assert.equal(answerInput(ask(one), {}), undefined);
+    assert.equal(answerInput(ask(one), { "Which one?": "" }), undefined);
+    // More entries than options plus one free-text answer.
+    const multi = [{ question: "Q", header: "H", multiSelect: true, options: [{ label: "A" }] }];
+    assert.equal(answerInput(ask(multi), { Q: ["A", "b", "c"] }), undefined);
+    // `answers` already present means this is not ours to add.
+    const taken: PendingItem = { ...ask(one), tool_input: { questions: one, answers: {} } };
+    assert.equal(answerInput(taken, { "Which one?": "Red" }), undefined);
+  });
+
+  it("carries free text, which is what the extra slot is for", () => {
+    assert.deepEqual(answerInput(ask(one), { "Which one?": "neither, do X" })?.answers, { "Which one?": "neither, do X" });
   });
 });
 

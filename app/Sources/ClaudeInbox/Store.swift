@@ -259,6 +259,32 @@ final class InboxStore {
         reload()
     }
 
+    /// Answer a question from the panel. The answer is the decision: it rides in
+    /// `updatedInput`, and if we cannot build one Claude Code accepts we do not
+    /// send anything — a refused input is dropped in silence.
+    func answer(_ row: Row, answers: [String: [String]]) {
+        guard case .pending(let item) = row,
+              let input = Format.answerInput(item, answers: answers)
+        else {
+            problem = "That answer is not one Claude Code would accept — answer it in the terminal."
+            return
+        }
+        Inbox.writeVerdict(req: item.req, decision: "allow", reason: "Answered in Claude Inbox", input: input)
+        Notifier.shared.withdraw(item.req)
+        rows.removeAll { $0.id == row.id }
+        reload()
+    }
+
+    /// Approve a plan. Same rule: the allow has to carry the input back.
+    func approvePlan(_ row: Row) {
+        guard case .pending(let item) = row else { return }
+        Inbox.writeVerdict(req: item.req, decision: "allow", reason: "Approved in Claude Inbox",
+                           input: item.toolInput)
+        Notifier.shared.withdraw(item.req)
+        rows.removeAll { $0.id == row.id }
+        reload()
+    }
+
     func decide(_ row: Row, allow: Bool, grant: Format.Grant? = nil) {
         guard case .pending(let item) = row else { return }
         let decision = allow ? "allow" : "deny"

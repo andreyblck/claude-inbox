@@ -18,16 +18,27 @@ inbox_ready || exit 0
 # can render, and writing it anyway is how ghost rows are born.
 [ -n "$(printf '%s' "$payload" | "$JQ" -r '.session_id // empty' 2>/dev/null)" ] || exit 0
 
+# Three kinds of ask reach this hook, and only one of them is "may I run this".
+# A question and a plan are answered on the card itself — Claude Code says so:
+# both declare requiresUserInteraction(), and a bare allow for them is dropped.
+tool=$(printf '%s' "$payload" | "$JQ" -r '.tool_name // empty' 2>/dev/null)
+case "$tool" in
+  AskUserQuestion) kind=question; state=blocked.question ;;
+  ExitPlanMode)    kind=plan;     state=blocked.plan ;;
+  *)               kind=permission; state=blocked.permission ;;
+esac
+
 req=$(inbox_req_id) || exit 0
 pending="$INBOX_DIR/pending/$req.json"
 # Armed before the file exists, so there is no window where a failure between the
 # two leaves a row behind.
 trap 'rm -f "$pending" 2>/dev/null' EXIT
 
-printf '%s' "$payload" | "$JQ" --arg req "$req" --argjson ts "$(date +%s)" --argjson pid "$$" '{
+printf '%s' "$payload" | "$JQ" --arg req "$req" --arg kind "$kind" --arg state "$state" \
+  --argjson ts "$(date +%s)" --argjson pid "$$" '{
   req: $req,
-  kind: "permission",
-  state: "blocked.permission",
+  kind: $kind,
+  state: $state,
   ts: $ts,
   # Whoever reads this row can check whether the process holding the request is
   # still alive. A SIGKILLed hook runs no trap, and without this the row is
@@ -67,17 +78,26 @@ reason=$(printf '%s' "$verdict" | "$JQ" -r '.reason // "Answered in Claude Inbox
 grants=$(printf '%s' "$verdict" | "$JQ" -c 'select(.updated_permissions | type == "array") | .updated_permissions' 2>/dev/null)
 case "$grants" in '['*) ;; *) grants="" ;; esac
 
+# The answer to a question or a plan. Claude Code drops a bare allow for a tool
+# that declares requiresUserInteraction(), so for those the answer IS the
+# decision: it rides in updatedInput, which must echo the tool's own input
+# untouched and add `answers` — anything else is refused.
+answer=$(printf '%s' "$verdict" | "$JQ" -c 'select(.updated_input | type == "object") | .updated_input' 2>/dev/null)
+case "$answer" in '{'*) ;; *) answer="" ;; esac
+
 # The contract, verbatim from the binary's own validator:
 #   {behavior: "allow", updatedInput?: object} | {behavior: "deny", message: string}
 # `decision` is an OBJECT. A string here fails schema validation, the decision is
 # dropped, the schema error is surfaced into the session, and the terminal prompts
 # anyway — which looks exactly like the hook timing out. Get this shape wrong and
 # nothing tells you.
-"$JQ" -n --arg d "$decision" --arg r "$reason" --argjson g "${grants:-null}" '{
+"$JQ" -n --arg d "$decision" --arg r "$reason" --argjson g "${grants:-null}" --argjson i "${answer:-null}" '{
   hookSpecificOutput: {
     hookEventName: "PermissionRequest",
     decision: (if $d == "allow"
-               then ({behavior: "allow"} + (if $g == null then {} else {updatedPermissions: $g} end))
+               then ({behavior: "allow"}
+                     + (if $g == null then {} else {updatedPermissions: $g} end)
+                     + (if $i == null then {} else {updatedInput: $i} end))
                else {behavior: "deny", message: $r} end)
   }
 }' 2>/dev/null

@@ -306,6 +306,60 @@ enum Format {
         return truncate(name.replacingOccurrences(of: "[-_]+", with: " ", options: .regularExpression), Limits.ask)
     }
 
+    /// One question, flattened for a form to draw.
+    struct Asked: Identifiable, Sendable {
+        var question: String
+        var header: String
+        var multiSelect: Bool
+        var options: [String]
+        var id: String { question }
+    }
+
+    static func asked(_ item: PendingItem) -> [Asked] {
+        guard let raw = item.toolInput?["questions"]?.arrayValue else { return [] }
+        return raw.compactMap { q in
+            guard let question = q["question"]?.stringValue, !question.isEmpty else { return nil }
+            let options = (q["options"]?.arrayValue ?? []).compactMap { $0["label"]?.stringValue }
+            var multi = false
+            if case .bool(true)? = q["multiSelect"] { multi = true }
+            return Asked(question: question, header: q["header"]?.stringValue ?? "",
+                         multiSelect: multi, options: options)
+        }
+    }
+
+    /// The answer to a question, in the one shape Claude Code accepts.
+    ///
+    /// `AskUserQuestion` declares `requiresUserInteraction()`, and a bare allow
+    /// for such a tool is dropped — the answer *is* the decision, and it rides in
+    /// `updatedInput`. That input is validated hard: every key it showed must come
+    /// back untouched, and `answers` is one of the few a sender may add, keyed by
+    /// the question's own text. So this refuses first rather than sending
+    /// something Claude Code would drop without telling anyone.
+    static func answerInput(_ item: PendingItem, answers: [String: [String]]) -> JSONValue? {
+        guard case .object(let input)? = item.toolInput, input["answers"] == nil else { return nil }
+        let asked = Dictionary(uniqueKeysWithValues: asked(item).map { ($0.question, $0) })
+        guard !asked.isEmpty, !answers.isEmpty else { return nil }
+
+        var out: [String: JSONValue] = [:]
+        for (question, values) in answers {
+            guard let a = asked[question] else { return nil }
+            let clean = values.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            guard !clean.isEmpty else { return nil }
+            if a.multiSelect {
+                // Never longer than the options plus one — the slot free text
+                // goes in.
+                guard clean.count <= a.options.count + 1 else { return nil }
+                out[question] = .array(clean.map(JSONValue.string))
+            } else {
+                guard clean.count == 1 else { return nil }
+                out[question] = .string(clean[0])
+            }
+        }
+        var updated = input
+        updated["answers"] = .object(out)
+        return .object(updated)
+    }
+
     /// A grant Claude Code offered on the request: trust this directory, accept
     /// edits, allow this tool. One press answers the request and removes the next
     /// dozen.
@@ -367,11 +421,15 @@ enum Format {
         let input = item.toolInput
         switch item.kind {
         case "question":
-            let questions = input?["questions"]
-            if questions?.count ?? 0 > 0 { return truncate("pick one of \(questions!.count)", max) }
-            return "answer a question"
+            // Its own words, not "pick one of 3". The question is the thing being
+            // asked and the card has room for it; the count says nothing at all.
+            let questions = asked(item)
+            guard let first = questions.first else { return "answer a question" }
+            let rest = questions.count - 1
+            let head = oneLine(first.question)
+            return truncate(rest > 0 ? "\(head) (+\(rest) more)" : head, max)
         case "plan":
-            return "approve plan"
+            return "Approve the plan?"
         default:
             let tool = item.toolName ?? "a tool"
             if tool == "Bash" {

@@ -60,6 +60,35 @@ date +%s > "$CLAUDE_INBOX_DIR/heartbeat"
 out=$(printf '%s' "$PAYLOAD" | CLAUDE_INBOX_PERMISSION_TIMEOUT=8 ./hook-permission.sh)
 check "rubbish left out" "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision | keys | join(",")')" "behavior"
 
+echo "1c. a question and a plan are their own kind of ask"
+date +%s > "$CLAUDE_INBOX_DIR/heartbeat"
+ask() { # payload -> the pending record it writes
+  ( sleep 0.7; for f in "$CLAUDE_INBOX_DIR"/pending/*.json; do [ -f "$f" ] || continue; cp "$f" "$CLAUDE_INBOX_DIR/ask.json"; /usr/bin/jq -n '{decision:"deny", reason:"x"}' > "$CLAUDE_INBOX_DIR/verdicts/$(basename "$f" .json).json"; done ) &
+  printf '%s' "$1" | CLAUDE_INBOX_PERMISSION_TIMEOUT=8 ./hook-permission.sh >/dev/null
+  cat "$CLAUDE_INBOX_DIR/ask.json"
+}
+q=$(ask '{"hook_event_name":"PermissionRequest","session_id":"q-1","cwd":"/x","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which one?","header":"Pick","multiSelect":false,"options":[{"label":"A"},{"label":"B"}]}]}}')
+check "question kind"  "$(printf '%s' "$q" | /usr/bin/jq -r .kind)"  "question"
+check "question state" "$(printf '%s' "$q" | /usr/bin/jq -r .state)" "blocked.question"
+check "questions kept" "$(printf '%s' "$q" | /usr/bin/jq -r '.tool_input.questions[0].question')" "Which one?"
+p=$(ask '{"hook_event_name":"PermissionRequest","session_id":"p-1","cwd":"/x","tool_name":"ExitPlanMode","tool_input":{"plan":"Do the thing."}}')
+check "plan kind"      "$(printf '%s' "$p" | /usr/bin/jq -r .kind)"  "plan"
+check "plan state"     "$(printf '%s' "$p" | /usr/bin/jq -r .state)" "blocked.plan"
+check "plan text kept" "$(printf '%s' "$p" | /usr/bin/jq -r .tool_input.plan)" "Do the thing."
+
+echo "1d. an answer rides in updatedInput, because a bare allow is dropped for these"
+date +%s > "$CLAUDE_INBOX_DIR/heartbeat"
+( sleep 0.7
+  for f in "$CLAUDE_INBOX_DIR"/pending/*.json; do
+    [ -f "$f" ] || continue
+    /usr/bin/jq '{decision:"allow", updated_input:(.tool_input + {answers:{"Which one?":"A"}})}' "$f" \
+      > "$CLAUDE_INBOX_DIR/verdicts/$(basename "$f" .json).json"
+  done ) &
+out=$(printf '%s' '{"hook_event_name":"PermissionRequest","session_id":"q-2","cwd":"/x","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which one?","header":"Pick","multiSelect":false,"options":[{"label":"A"},{"label":"B"}]}]}}' | CLAUDE_INBOX_PERMISSION_TIMEOUT=8 ./hook-permission.sh)
+check "answer arrives"   "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision.updatedInput.answers["Which one?"]')" "A"
+check "input echoed"     "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision.updatedInput.questions[0].header')" "Pick"
+check "still an allow"   "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision.behavior')" "allow"
+
 echo "1b. deny carries the message the model is told"
 ( for _ in $(seq 1 100); do
     f=$(ls "$CLAUDE_INBOX_DIR/pending"/*.json 2>/dev/null | head -1) || true

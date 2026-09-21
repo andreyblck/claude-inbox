@@ -234,21 +234,22 @@ export function projectName(cwd?: string, fallback?: string, name?: string): str
  * What the session wants, as a lowercase verb phrase.
  * "run rm -rf dist", "write deploy.sh", "pick one of 3".
  */
-export function askPhrase(item: PendingItem): string {
+export function askPhrase(item: PendingItem, max: number = LIMITS.ask): string {
   const input = item.tool_input ?? {};
   const str = (key: string) => (typeof input[key] === "string" ? (input[key] as string) : undefined);
 
   switch (item.kind) {
     case "question": {
-      const questions = Array.isArray((input as { questions?: unknown[] }).questions)
-        ? ((input as { questions: unknown[] }).questions as unknown[])
-        : [];
-      const first = questions[0] as { question?: string; options?: unknown[] } | undefined;
-      if (first?.options?.length) return truncate(`pick one of ${first.options.length}`, LIMITS.ask);
-      return truncate(first?.question ? oneLine(first.question) : "answer a question", LIMITS.ask);
+      // Its own words, not "pick one of 3". The question is the thing being
+      // asked and the card has room for it; the count says nothing at all.
+      const first = askedOf(item)[0];
+      if (!first) return "answer a question";
+      const rest = askedOf(item).length - 1;
+      const head = oneLine(first.question);
+      return truncate(rest > 0 ? `${head} (+${rest} more)` : head, max);
     }
     case "plan":
-      return "approve plan";
+      return "Approve the plan?";
     case "permission":
     default: {
       const tool = item.tool_name ?? "a tool";
@@ -460,6 +461,67 @@ const BUILT_IN_COMMANDS = new Set(
    update upgrade usage usage-credits version vim voice web-setup wellbeing workflow-launch-exec
    workflows`.split(/\s+/),
 );
+
+/** One question, flattened for a form to draw. */
+export type Asked = { question: string; header: string; multiSelect: boolean; options: string[] };
+
+export function askedOf(item: PendingItem): Asked[] {
+  const raw = item.tool_input?.questions;
+  if (!Array.isArray(raw)) return [];
+  const out: Asked[] = [];
+  for (const q of raw) {
+    if (typeof q !== "object" || q === null) continue;
+    const r = q as Record<string, unknown>;
+    if (typeof r.question !== "string" || !r.question) continue;
+    const options = (Array.isArray(r.options) ? r.options : [])
+      .map((o) => (typeof o === "object" && o !== null ? (o as Record<string, unknown>).label : undefined))
+      .filter((l): l is string => typeof l === "string");
+    out.push({
+      question: r.question,
+      header: typeof r.header === "string" ? r.header : "",
+      multiSelect: r.multiSelect === true,
+      options,
+    });
+  }
+  return out;
+}
+
+/**
+ * The answer to a question, in the one shape Claude Code accepts.
+ *
+ * `AskUserQuestion` declares `requiresUserInteraction()`, and a bare allow for
+ * such a tool is dropped — the answer *is* the decision, and it rides in
+ * `updatedInput`. That input is validated hard: every key it shows must come
+ * back untouched, and `answers` is one of the few a sender may add, keyed by the
+ * question's own text. Anything else is refused, so this refuses first rather
+ * than sending it and hoping.
+ */
+export function answerInput(
+  item: PendingItem,
+  answers: Record<string, string | string[]>,
+): Record<string, unknown> | undefined {
+  const input = item.tool_input;
+  if (!input || "answers" in input) return undefined;
+  const asked = new Map(askedOf(item).map((a) => [a.question, a]));
+  if (!asked.size || !Object.keys(answers).length) return undefined;
+
+  const out: Record<string, string | string[]> = {};
+  for (const [question, value] of Object.entries(answers)) {
+    const a = asked.get(question);
+    if (!a) return undefined;
+    if (typeof value === "string") {
+      if (!value.trim()) return undefined;
+      out[question] = value;
+      continue;
+    }
+    // A list is only ever valid for a multiSelect, and never longer than the
+    // options plus one — the slot free text goes in.
+    if (!a.multiSelect || !value.length || value.length > a.options.length + 1) return undefined;
+    if (value.some((v) => typeof v !== "string" || !v.trim())) return undefined;
+    out[question] = value;
+  }
+  return { ...input, answers: out };
+}
 
 /**
  * A grant Claude Code offered on the request: trust this directory, accept edits,

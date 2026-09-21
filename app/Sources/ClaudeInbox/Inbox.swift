@@ -259,7 +259,8 @@ enum Inbox {
     // MARK: - Writing
 
     /// Atomic, because a hook is polling for this exact file in a tight loop.
-    static func writeVerdict(req: String, decision: String, reason: String, grants: [JSONValue] = []) {
+    static func writeVerdict(req: String, decision: String, reason: String, grants: [JSONValue] = [],
+                             input: JSONValue? = nil) {
         let dir = path("verdicts")
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let dest = (dir as NSString).appendingPathComponent("\(req).json")
@@ -268,6 +269,9 @@ enum Inbox {
         // Only ever what Claude Code itself suggested. Omitted entirely when
         // empty: a malformed array is dropped whole, and silently.
         if !grants.isEmpty { payload["updated_permissions"] = .array(grants) }
+        // For a tool that answers on its own card, this is not extra — it is the
+        // decision. A bare allow for one of those is dropped.
+        if let input { payload["updated_input"] = input }
         guard let data = try? JSONEncoder().encode(payload) else { return }
         guard (try? data.write(to: URL(fileURLWithPath: tmp))) != nil else { return }
         try? FileManager.default.moveItem(atPath: tmp, toPath: dest)

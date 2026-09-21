@@ -284,7 +284,7 @@ if CommandLine.arguments.contains("--dump") {
         switch row {
         case .pending(let p):
             project = Format.projectName(cwd: p.cwd, fallback: p.sessionId, name: nil)
-            what = Format.askPhrase(p)
+            what = Format.askPhrase(p, max: 60)
         case .session(let s):
             project = Format.label(s)
             what = Format.headline(s, max: 60)

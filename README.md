@@ -63,7 +63,7 @@ hooks they started with and pick up the new ones on their next turn.
 
 | Section | What lands there |
 |---|---|
-| **Waiting for You** | permission requests — Approve / Deny on the row and on the banner, plus **Allow and…** for the broader grant Claude Code itself offers (trust this directory, accept edits), which answers this request and the next dozen; turns that ended by asking you something, with the ask in one line and one-tap replies |
+| **Waiting for You** | questions (`AskUserQuestion`) answered on the card — tap an option or type your own; plans (`ExitPlanMode`) read and approved there too; permission requests — Approve / Deny on the row and on the banner, plus **Allow and…** for the broader grant Claude Code itself offers (trust this directory, accept edits), which answers this request and the next dozen; turns that ended by asking you something, with the ask in one line and one-tap replies |
 | **Answered** | finished turns, unread ones with a blue dot; open a row for the whole answer as rendered markdown |
 | **Running** | what each session is doing right now, in the model's own words |
 

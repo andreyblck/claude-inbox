@@ -65,6 +65,13 @@ pend demo01 Bash '{"command":"npm run db:migrate -- --env staging","description"
   '.permission_suggestions = $s' "$INBOX_DIR/pending/demo01.json" > "$INBOX_DIR/pending/demo01.tmp" \
   && mv "$INBOX_DIR/pending/demo01.tmp" "$INBOX_DIR/pending/demo01.json"
 
+# A question and a plan: the two asks that are answered on the card itself.
+"$JQ" -n --argjson ts "$((now - 90))" '{demo:true, req:"demo02", kind:"question", state:"blocked.question", ts:$ts,
+  session_id:"demo-q", cwd:"'"$HOME"'/work/acme-web", tool_name:"AskUserQuestion", permission_mode:"default", transcript_path:null,
+  tool_input:{questions:[{question:"The export breaks either way — which do we protect?",header:"Trade-off",multiSelect:false,
+    options:[{label:"Keep legacy_rate"},{label:"Drop it and patch the export"},{label:"Ship behind a flag"}]}]}}' \
+  > "$INBOX_DIR/pending/demo02.json"
+
 sess demo-s1 idle "$HOME/work/acme-api" "ACME-231" "" "track" 660 \
   "/track https://linear.app/acme/issue/ACME-231/legacy-rate-column is this done? finish it if not" \
   "Both PRs are green and merged to staging.
