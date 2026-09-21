@@ -56,3 +56,16 @@ enum Bridge {
         return text
     }
 }
+
+extension Bundle {
+    /// What this copy actually is. A build that cannot say its own version leaves
+    /// a person with no way to tell it apart from the one on the releases page —
+    /// which is the whole point of putting it in the menu.
+    static var version: String {
+        (main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "dev"
+    }
+
+    static var releasesURL: URL? {
+        URL(string: "https://github.com/andreyblck/claude-inbox/releases/latest")
+    }
+}

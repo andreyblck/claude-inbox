@@ -8,6 +8,7 @@ Approve, decide, read the answer, reply — without finding the terminal.
 </p>
 
 - [Install](#install)
+- [Update](#update)
 - [What it does](#what-it-does)
 - [Keyboard](#keyboard)
 - [How it works](#how-it-works)
@@ -31,6 +32,28 @@ macOS 15+, Claude Code signed in. No terminal needed.
 Install Bridge adds hooks to `~/.claude/settings.json` (backed up first) and wraps your status line if you have one. Sessions already running appear on their next turn. Remove: **… → Uninstall Bridge**, trash the app.
 
 From source: `git clone https://github.com/andreyblck/claude-inbox.git && cd claude-inbox && ./app/package.sh` — builds a universal binary into /Applications; needs the Xcode command line tools.
+
+## Update
+
+The app does not check for updates by itself — it never talks to anything but
+your own machine, and a background version check would end that. So it tells you
+what it is and lets you compare: **… → Claude Inbox 0.1.5**, and **Check for
+Updates…** opens the [releases page](https://github.com/andreyblck/claude-inbox/releases/latest).
+
+To update, download the new `.dmg` and drag it over the old app. Three things
+worth knowing:
+
+- **The bridge comes with it.** The hooks live inside the app bundle, so
+  replacing the app replaces them — nothing to reinstall, and no stale hook
+  pointing at a version you deleted. Re-run **Install Bridge** only if the panel
+  says it is not connected.
+- **Gatekeeper asks again.** Each new unsigned build is new to macOS: Privacy &
+  Security → Open Anyway, once per update.
+- **Quit it first**, or the old copy will be running while you replace it —
+  **… → Quit Claude Inbox**, then drag. (`./app/package.sh` does this for you.)
+
+From source: `git pull && ./app/package.sh`. Sessions already running keep the
+hooks they started with and pick up the new ones on their next turn.
 
 ## What it does
 

@@ -407,6 +407,11 @@ private struct Header: View {
             // Quit lives where a Mac app keeps it: in a menu, not on a power
             // button nobody expects to find in a panel.
             Menu {
+                Button("Claude Inbox \(Bundle.version)") {}.disabled(true)
+                Button("Check for Updates…") {
+                    if let url = Bundle.releasesURL { NSWorkspace.shared.open(url) }
+                }
+                Divider()
                 if Bridge.bundledInstaller != nil {
                     if store.bridgeInstalled {
                         Button("Reinstall Bridge") { store.installBridge() }

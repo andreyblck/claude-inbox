@@ -9,6 +9,11 @@ cd "$(dirname "$0")"
 
 CONFIG="${1:-release}"
 NAME=ClaudeInbox
+# One source of truth, and the tag follows it. Reading it from `git describe`
+# instead would stamp whatever was tagged *last* — the version before this one,
+# because the tag is cut after the build.
+VERSION=$(cat ../VERSION 2>/dev/null | tr -d '[:space:]')
+VERSION=${VERSION:-0.0}
 APP="build/$NAME.app"
 
 # Only the bundle path goes to stdout: this script is meant to be substituted
@@ -40,8 +45,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>$NAME</string>
   <key>CFBundleDisplayName</key><string>Claude Inbox</string>
   <key>CFBundleIdentifier</key><string>com.blckgh.claude-inbox</string>
-  <key>CFBundleVersion</key><string>0.1</string>
-  <key>CFBundleShortVersionString</key><string>0.1</string>
+  <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>$NAME</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>

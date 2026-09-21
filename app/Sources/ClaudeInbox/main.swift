@@ -101,6 +101,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    /// Opens the releases page rather than asking GitHub in the background. The
+    /// app promises that nothing leaves the machine which Claude Code was not
+    /// already sending, and a silent version check would quietly break it.
+    @objc private func openReleases() {
+        if let url = Bundle.releasesURL { NSWorkspace.shared.open(url) }
+    }
+
     private func showMenu() {
         let menu = NSMenu()
 
@@ -124,6 +131,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Panel: ⌥Space", action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Version \(Bundle.version)", action: nil, keyEquivalent: ""))
+        let update = NSMenuItem(
+            title: "Check for Updates…", action: #selector(openReleases), keyEquivalent: "")
+        update.target = self
+        menu.addItem(update)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(
             title: "Quit Claude Inbox", action: #selector(NSApplication.terminate(_:)),
