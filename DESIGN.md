@@ -309,3 +309,12 @@ terminal, copy the answer, the resume command or the key, show the folder, renam
 — and the two used most are on the keyboard: ⌘L and ⌘T. "Go to Terminal" brings
 the app the session runs in forward. Which tab is the terminal's business, and
 most terminals offer no way to ask for one; the window is what can be promised.
+
+## One scroller
+
+The panel scrolls; nothing inside it does. A `ScrollView` nested in the list ate
+the wheel and would not hand it back — with the pointer over a long answer the
+panel could not be scrolled at all, and an open row became a dead end you had to
+collapse to get out of. A long answer is capped, faded at the cut and opened in
+place with **Show more**; it is never given a scroller of its own. A horizontal
+one, like the row of replies, is fine: it competes with nothing.

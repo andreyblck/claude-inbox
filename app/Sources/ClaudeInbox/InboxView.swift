@@ -578,6 +578,7 @@ private struct RowCard: View {
     var focused = false
     @State private var hovering = false
     @State private var answerHeight: CGFloat = 0
+    @State private var answerExpanded = false
     @State private var draft = ""
     private static let answerMax: CGFloat = 380
 
@@ -668,6 +669,9 @@ private struct RowCard: View {
         .onHover { value in
             withAnimation(Theme.hover) { hovering = value }
         }
+        // A row opened again starts at the top of its answer, not where the last
+        // reading left it.
+        .onChange(of: isOpen) { _, open in if !open { answerExpanded = false } }
     }
 
     /// The highlight a Mac list draws: a rounded fill inside the platter, quiet
@@ -806,20 +810,34 @@ private struct RowCard: View {
                 // The whole answer. Truncating this is what kept sending people
                 // back to the terminal.
                 if let answer = store.narration ?? s.lastMessage, !answer.isEmpty {
-                    ScrollView {
-                        MarkdownView(text: answer)
-                            .measureHeight(into: $answerHeight)
+                    // Never a scroll view inside a scroll view. One nested here
+                    // ate the wheel and would not hand it back: with the pointer
+                    // over a long answer the panel could not be scrolled at all,
+                    // and an open row became a dead end. A long answer is capped
+                    // and opened in place instead; the panel's own scroller stays
+                    // the only one.
+                    let overflowing = answerHeight > Self.answerMax
+                    let capped = overflowing && !answerExpanded
+                    MarkdownView(text: answer)
+                        .measureHeight(into: $answerHeight)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: capped ? Self.answerMax : nil, alignment: .top)
+                        .clipped()
+                        // Cut through a line reads as broken; fading out reads as
+                        // "there is more", which is what the button then offers.
+                        .mask(
+                            LinearGradient(
+                                stops: [.init(color: .black, location: 0),
+                                        .init(color: .black, location: capped ? 0.86 : 1),
+                                        .init(color: capped ? .clear : .black, location: 1)],
+                                startPoint: .top, endPoint: .bottom))
+                    if overflowing {
+                        Button(answerExpanded ? "Show less" : "Show more") {
+                            withAnimation(Theme.expand) { answerExpanded.toggle() }
+                        }
+                        .buttonStyle(.link)
+                        .font(Theme.Font.caption)
                     }
-                    .scrollIndicators(.never)
-                    .frame(maxHeight: Self.answerMax)
-                    // An answer longer than its window fades out at the bottom —
-                    // "there is more" — instead of being cut through a line.
-                    .mask(
-                        LinearGradient(
-                            stops: [.init(color: .black, location: 0),
-                                    .init(color: .black, location: answerHeight > Self.answerMax ? 0.88 : 1),
-                                    .init(color: answerHeight > Self.answerMax ? .clear : .black, location: 1)],
-                            startPoint: .top, endPoint: .bottom))
                 }
                 if !store.activity.isEmpty {
                     // These are sentences now — the model's own description of
