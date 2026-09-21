@@ -99,17 +99,57 @@ printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-6","cwd":"/x"
 printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-6","cwd":"/x","prompt":"<task-notification><task-id>a</task-id></task-notification>"}' | ./hook-session.sh
 check "real prompt kept" "$(/usr/bin/jq -r .last_prompt "$CLAUDE_INBOX_DIR/sessions/s-6.json")" "/morgan:pull дособери"
 
-echo "4d. Notification is the event that fires for the way people actually work"
-# A session in acceptEdits or bypassPermissions almost never raises a permission
-# request. Without this the bridge is deaf through most of a working day.
-printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-7","cwd":"/x","prompt":"поехали"}' | ./hook-session.sh
-printf '%s' '{"hook_event_name":"Notification","session_id":"s-7","cwd":"/x","message":"Claude is waiting for your input"}' | ./hook-session.sh
-check "state"        "$(/usr/bin/jq -r .state       "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "blocked.dialog"
-check "what it says" "$(/usr/bin/jq -r .waiting_for "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "Claude is waiting for your input"
-# Answering in the terminal has to clear it, or the row is stuck forever.
-printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-7","cwd":"/x","prompt":"ответил"}' | ./hook-session.sh
+echo "4e. the issue is named once and stays, because a follow-up rarely repeats it"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-8","cwd":"/x","prompt":"/track https://linear.app/skyaccess/issue/SKY-5463/6-hide-single-pilot-legs готово?"}' | ./hook-session.sh
+check "read from the link" "$(/usr/bin/jq -r .issue "$CLAUDE_INBOX_DIR/sessions/s-8.json")" "SKY-5463"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-8","cwd":"/x","prompt":"да, пуш"}' | ./hook-session.sh
+printf '%s' '{"hook_event_name":"Stop","session_id":"s-8","cwd":"/x","last_assistant_message":"ok"}' | ./hook-session.sh
+check "survives a follow-up" "$(/usr/bin/jq -r .issue "$CLAUDE_INBOX_DIR/sessions/s-8.json")" "SKY-5463"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-8","cwd":"/x","prompt":"теперь SKY-5968"}' | ./hook-session.sh
+check "the newer one wins" "$(/usr/bin/jq -r .issue "$CLAUDE_INBOX_DIR/sessions/s-8.json")" "SKY-5968"
+# A record written before this field existed still has the link in its prompt.
+printf '%s' '{"session_id":"s-9","state":"working","ts":1,"last_prompt":"/track https://linear.app/skyaccess/issue/SKY-4483/x"}' > "$CLAUDE_INBOX_DIR/sessions/s-9.json"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-9","cwd":"/x","prompt":"продолжай"}' | ./hook-session.sh
+check "older records catch up" "$(/usr/bin/jq -r .issue "$CLAUDE_INBOX_DIR/sessions/s-9.json")" "SKY-4483"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-10","cwd":"/x","prompt":"F2 3986, F3 WI-10 5427"}' | ./hook-session.sh
+check "a code is not an issue" "$(/usr/bin/jq -r .issue "$CLAUDE_INBOX_DIR/sessions/s-10.json")" "null"
+
+echo "4f. the step is declared once and stays, like the issue"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-11","cwd":"/x","prompt":"/sky-verify-mine"}' | ./hook-session.sh
+check "read from the command" "$(/usr/bin/jq -r .phase "$CLAUDE_INBOX_DIR/sessions/s-11.json")" "sky verify mine"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-11","cwd":"/x","prompt":"доделывай всё что быстро"}' | ./hook-session.sh
+printf '%s' '{"hook_event_name":"Stop","session_id":"s-11","cwd":"/x","last_assistant_message":"ok"}' | ./hook-session.sh
+check "survives a follow-up" "$(/usr/bin/jq -r .phase "$CLAUDE_INBOX_DIR/sessions/s-11.json")" "sky verify mine"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-11","cwd":"/x","prompt":"/morgan:clean"}' | ./hook-session.sh
+check "the newer one wins" "$(/usr/bin/jq -r .phase "$CLAUDE_INBOX_DIR/sessions/s-11.json")" "clean"
+
+echo "4d. a permission prompt is a block; an idle notice is not"
+# Both arrive as Notification. `notification_type` tells them apart, and the fixture
+# here used to leave it out — so the test passed on a payload Claude Code never
+# sends, while 7 of 9 real ones were idle notices filed under "waiting for you".
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-7","cwd":"/x","prompt":"go"}' | ./hook-session.sh
+printf '%s' '{"hook_event_name":"Notification","session_id":"s-7","cwd":"/x","message":"Claude needs your permission","notification_type":"permission_prompt"}' | ./hook-session.sh
+check "permission blocks" "$(/usr/bin/jq -r .state       "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "blocked.dialog"
+check "what it says"      "$(/usr/bin/jq -r .waiting_for "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "Claude needs your permission"
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-7","cwd":"/x","prompt":"ok"}' | ./hook-session.sh
 check "clears itself" "$(/usr/bin/jq -r .state       "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "working"
 check "and forgets"   "$(/usr/bin/jq -r .waiting_for "$CLAUDE_INBOX_DIR/sessions/s-7.json")" "null"
+# The turn ended, a minute passed, nobody typed. The session may well be busy —
+# waiting on a background agent or on CI — and it is not waiting for a person.
+printf '%s' '{"hook_event_name":"Stop","session_id":"s-12","cwd":"/x","last_assistant_message":"CI ещё идёт"}' | ./hook-session.sh
+before=$(/usr/bin/jq -r .ts "$CLAUDE_INBOX_DIR/sessions/s-12.json")
+sleep 1
+printf '%s' '{"hook_event_name":"Notification","session_id":"s-12","cwd":"/x","message":"Claude is waiting for your input","notification_type":"idle_prompt"}' | ./hook-session.sh
+check "idle is not a block"   "$(/usr/bin/jq -r .state       "$CLAUDE_INBOX_DIR/sessions/s-12.json")" "idle"
+check "and asks for nothing"  "$(/usr/bin/jq -r .waiting_for "$CLAUDE_INBOX_DIR/sessions/s-12.json")" "null"
+check "the answer survives"   "$(/usr/bin/jq -r .last_message "$CLAUDE_INBOX_DIR/sessions/s-12.json")" "CI ещё идёт"
+# Not an observation of anything new: the registry, which knows it is busy, must
+# stay the fresher of the two.
+check "and is not news"       "$(/usr/bin/jq -r .ts "$CLAUDE_INBOX_DIR/sessions/s-12.json")" "$before"
+# An older Claude Code sends no type; the sentence is all there is to go on.
+printf '%s' '{"hook_event_name":"Stop","session_id":"s-13","cwd":"/x"}' | ./hook-session.sh
+printf '%s' '{"hook_event_name":"Notification","session_id":"s-13","cwd":"/x","message":"Claude is waiting for your input"}' | ./hook-session.sh
+check "untyped idle"          "$(/usr/bin/jq -r .state "$CLAUDE_INBOX_DIR/sessions/s-13.json")" "idle"
 
 echo "5. the pending record keeps what the UI and the grant need"
 ( for _ in $(seq 1 100); do

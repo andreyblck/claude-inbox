@@ -6,7 +6,7 @@ import { execFileSync } from "child_process";
 import { open as fsOpen, mkdir, readdir, readFile, rename, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { basename, join } from "path";
-import { oneLine, phaseOf, type InboxState, type PendingItem, type SessionRecord } from "./state";
+import { issueOf, oneLine, phaseOf, type InboxState, type PendingItem, type SessionRecord } from "./state";
 
 export type UsageRecord = {
   ts: number;
@@ -124,6 +124,11 @@ export function liveSessionsDir(configDir: string): string {
 type LiveStatus = "busy" | "shell" | "idle" | "waiting";
 
 /** The two kinds a person is actually having a session with. The rest is machinery. */
+/**
+ * The directory the app asks its own questions from. A `claude -p` run registers
+ * like any session, and this name is how its row is told from somebody's work.
+ */
+export const ASK_PREFIX = "claude-inbox-ask-";
 const HUMAN_KINDS = new Set(["interactive", "bg"]);
 
 type LiveSession = {
@@ -243,6 +248,7 @@ export async function readLiveSessions(): Promise<LiveRegistry> {
     for (const row of await readJsonDir<LiveSession>(dir)) {
       if (!row.sessionId) continue;
       if (row.kind && !HUMAN_KINDS.has(row.kind)) continue; // daemons are not sessions
+      if (basename(row.cwd ?? "").startsWith(ASK_PREFIX)) continue; // our own question, not a session
       if (!alive(row.pid, row.startedAt)) continue; // stale file from a closed session
       out.push({
         session_id: row.sessionId,
@@ -375,6 +381,10 @@ function describeTool(name: string, input?: Record<string, unknown>): string {
   const file = () => str("file_path")?.split("/").pop();
   switch (name) {
     case "Bash": {
+      // The model writes a description beside every command, and it is the
+      // sentence the command only implies.
+      const said = str("description")?.trim();
+      if (said) return oneLine(said);
       const command = str("command");
       return `running ${command ? commandGist(command) : "a command"}`;
     }
@@ -460,6 +470,76 @@ export async function readSessionSummary(transcriptPath?: string): Promise<Sessi
  * The last few things a session did, for the detail pane.
  * Transcripts grow to hundreds of megabytes, so only the tail is read.
  */
+/**
+ * The issue a session was given, for a record that lost it.
+ *
+ * The link is in the first prompt and a follow-up never repeats it, so a session
+ * older than the bridge's `issue` field has nothing left in its record. The whole
+ * file is read, once: only `last-prompt` rows count, because a tool result names
+ * other issues all day and none of them is this session.
+ */
+/**
+ * The command a session was opened with: `/sky-verify-mine`.
+ *
+ * A bare slash command is not a `last-prompt` row — that row says null — it is a
+ * user row wrapped in `<command-name>`. It is the one declaration of intent in the
+ * file, and the first follow-up pushes it out of everything else we read.
+ */
+const commandCache = new Map<string, string | undefined>();
+export function commandIn(text: string): string | undefined {
+  const name = /<command-name>\s*(\/[^<\s]+)\s*<\/command-name>/.exec(text)?.[1];
+  if (!name) return undefined;
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1];
+  return oneLine(`${name} ${args ?? ""}`);
+}
+export async function readCommand(transcriptPath?: string): Promise<string | undefined> {
+  if (!transcriptPath) return undefined;
+  if (commandCache.has(transcriptPath)) return commandCache.get(transcriptPath);
+  let found: string | undefined;
+  try {
+    const lines = (await readFile(transcriptPath, "utf8")).split("\n");
+    for (let i = lines.length - 1; i >= 0 && !found; i--) {
+      if (!lines[i].includes("<command-name>")) continue;
+      try {
+        const row = JSON.parse(lines[i]) as { type?: string; message?: { content?: unknown } };
+        if (row.type !== "user") continue;
+        const content = row.message?.content;
+        const text = typeof content === "string" ? content
+          : Array.isArray(content) ? content.map((b) => (b as { text?: string }).text ?? "").join("\n") : "";
+        found = commandIn(text);
+      } catch {
+        // a truncated row is not an error
+      }
+    }
+  } catch {
+    // no transcript, no command
+  }
+  commandCache.set(transcriptPath, found);
+  return found;
+}
+
+const issueCache = new Map<string, string | undefined>();
+export async function readIssue(transcriptPath?: string): Promise<string | undefined> {
+  if (!transcriptPath) return undefined;
+  if (issueCache.has(transcriptPath)) return issueCache.get(transcriptPath);
+  let found: string | undefined;
+  try {
+    const lines = (await readFile(transcriptPath, "utf8")).split("\n");
+    for (let i = lines.length - 1; i >= 0 && !found; i--) {
+      if (!lines[i].includes('"type":"last-prompt"')) continue;
+      try {
+        found = issueOf((JSON.parse(lines[i]) as { lastPrompt?: string }).lastPrompt);
+      } catch {
+        // a truncated row is not an error
+      }
+    }
+  } catch {
+    // no transcript, no issue
+  }
+  issueCache.set(transcriptPath, found);
+  return found;
+}
+
 export async function readRecentActivity(transcriptPath?: string, maxTools = 6): Promise<string[]> {
   if (!transcriptPath) return [];
   const buf = await readTail(transcriptPath, 192 * 1024);
@@ -506,10 +586,12 @@ export async function enrichRows(rows: Row[]): Promise<Row[]> {
       const title = row.session.title ?? summary.title;
       const activity = summary.doing ? [summary.doing] : row.session.activity;
       const last_prompt = row.session.last_prompt ?? summary.prompt;
-      const phaseFromPrompt = row.session.phase ?? phaseOf(last_prompt);
+      const phaseFromPrompt =
+        row.session.phase ?? phaseOf(last_prompt) ?? phaseOf(await readCommand(row.session.transcript_path));
+      const issue = row.session.issue ?? issueOf(last_prompt) ?? (await readIssue(row.session.transcript_path));
       return {
         ...row,
-        session: { ...row.session, title, phase: phaseFromPrompt, activity, last_prompt, saying: summary.saying },
+        session: { ...row.session, title, phase: phaseFromPrompt, issue, activity, last_prompt, saying: summary.saying },
       };
     }),
   );
@@ -596,6 +678,7 @@ export function mergeRows(
         ...alive,
         // The hooks are the only source for any of these.
         phase: hooked.phase ?? alive.phase,
+        issue: hooked.issue ?? alive.issue,
         last_message: hooked.last_message ?? alive.last_message,
         last_prompt: hooked.last_prompt ?? alive.last_prompt,
         waiting_for: hooked.waiting_for ?? alive.waiting_for,

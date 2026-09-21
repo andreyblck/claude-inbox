@@ -37,6 +37,11 @@ struct SessionRecord: Codable, Sendable, Identifiable {
     var endReason: String?
     var lastPrompt: String?
     var lastMessage: String?
+    /// The tracker issue the session is working on, e.g. "SKY-5463". The bridge
+    /// keeps it from the prompt that named it; a follow-up rarely names it again.
+    var issue: String?
+    /// `permission_prompt`, from the Notification that blocked it.
+    var notificationType: String?
     var demo: Bool?
 
     // Filled in from the live registry and the transcript, not from the file.
@@ -45,6 +50,21 @@ struct SessionRecord: Codable, Sendable, Identifiable {
     var waitingFor: String?
     var configDir: String?
     var phase: String?
+    /// A short generated name, for a session that named no issue. See `Labels`.
+    var label: String?
+    /// The tool call a blocked session is stopped on, in the model's own words.
+    var asking: String?
+    /// Whether the turn ended by asking the person for something. See `Asks`.
+    var needsYou = false
+    /// What it asks for, or — when it asks nothing — what landed. One line.
+    var line: String?
+    /// Answers the person is likely to give. A tap drafts one; it never sends.
+    var replies: [String] = []
+    /// An answer nobody has opened yet — the blue dot Mail puts on a message.
+    var unread = false
+    /// Everything the filter matches against, built once per read. Building it
+    /// per keystroke ran a dozen regular expressions per row, eight times over.
+    var search = ""
     var title: String?
     var saying: String?
     var activity: [String] = []
@@ -58,7 +78,10 @@ struct SessionRecord: Codable, Sendable, Identifiable {
         // and put "working" back in rows that had something better to say.
         // `waitingFor` now comes from the hooks too, not only the live registry:
         // Notification carries what the session wants in Claude Code own words.
-        case endReason, lastPrompt, lastMessage, demo, phase, waitingFor
+        case endReason, lastPrompt, lastMessage, demo, phase, waitingFor, issue, notificationType
+        // Never written by the bridge; a demo row carries them so the panel can be
+        // judged, and photographed, without a model in the loop.
+        case label, needsYou, line, replies
     }
 }
 

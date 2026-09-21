@@ -148,6 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         guard let button = statusItem.button else { return }
         store.reload()
+        store.panelVisible = true
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         // A popover from a status item does not take focus by itself, and a panel
         // you cannot type in or scroll with the keyboard is half a panel.
@@ -155,8 +156,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
+        store.panelVisible = false
         store.open(nil)
     }
+}
+
+// `--snapshot out.png [--light] [--open N]` draws the panel into a file, on the
+// real inbox. A design judged from a description of it is a design nobody has
+// looked at; this is how the panel gets looked at without a person holding a
+// screenshot key. The backdrop stands in for a blurred wallpaper, because a
+// popover's vibrancy has nothing behind it off screen.
+if let flag = CommandLine.arguments.firstIndex(of: "--snapshot"), CommandLine.arguments.count > flag + 1 {
+    let out = CommandLine.arguments[flag + 1]
+    let light = CommandLine.arguments.contains("--light")
+    let openIndex = CommandLine.arguments.firstIndex(of: "--open")
+        .flatMap { CommandLine.arguments.count > $0 + 1 ? Int(CommandLine.arguments[$0 + 1]) : nil }
+    MainActor.assumeIsolated {
+        _ = NSApplication.shared
+        let store = InboxStore()
+        store.panelVisible = true
+        store.reload()
+        let deadline = Date().addingTimeInterval(4)
+        while !store.loadedOnce, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        if let openIndex, store.rows.indices.contains(openIndex) { store.open(store.rows[openIndex]) }
+
+        let host = NSHostingView(rootView: InboxView(store: store))
+        let backdrop = NSView(frame: NSRect(x: 0, y: 0, width: Theme.panelWidth, height: 900))
+        backdrop.wantsLayer = true
+        let wash = CAGradientLayer()
+        wash.colors = light
+            ? [NSColor(white: 0.93, alpha: 1).cgColor, NSColor(white: 0.86, alpha: 1).cgColor]
+            : [NSColor(red: 0.16, green: 0.17, blue: 0.20, alpha: 1).cgColor,
+               NSColor(red: 0.11, green: 0.12, blue: 0.14, alpha: 1).cgColor]
+        backdrop.layer = wash
+        let window = NSWindow(contentRect: backdrop.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
+        window.contentView = backdrop
+        backdrop.addSubview(host)
+        for _ in 0..<12 {
+            let size = host.fittingSize
+            host.frame = NSRect(x: 0, y: 0, width: Theme.panelWidth, height: max(size.height, 1))
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        }
+        backdrop.frame = host.frame
+        window.setContentSize(host.frame.size)
+        wash.frame = backdrop.bounds
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+
+        guard let rep = backdrop.bitmapImageRepForCachingDisplay(in: backdrop.bounds) else { exit(1) }
+        backdrop.cacheDisplay(in: backdrop.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else { exit(1) }
+        try? png.write(to: URL(fileURLWithPath: out))
+        print("\(out)  \(Int(host.frame.width))x\(Int(host.frame.height))")
+    }
+    exit(0)
 }
 
 // `--dump` prints what the panel would show, so the port can be diffed against
@@ -174,7 +228,17 @@ if CommandLine.arguments.contains("--dump") {
         s.saying = summary.saying
         s.lastPrompt = s.lastPrompt ?? summary.prompt
         s.phase = s.phase ?? Format.phase(fromPrompt: s.lastPrompt)
+            ?? Format.phase(fromPrompt: Transcript.command(of: s.transcriptPath))
+        s.issue = s.issue ?? Format.issue(fromPrompt: s.lastPrompt)
+            ?? Transcript.issue(of: s.transcriptPath)
+        if s.state == .idle, let message = s.lastMessage, let reading = Asks.cached(s.sessionId, message: message) {
+            s.needsYou = reading.needsYou
+            s.line = reading.line
+        }
+        s.label = s.label ?? Labels.cached(s.sessionId)
+        s.state = Format.state(s)
         if let doing = summary.doing { s.activity = [doing] }
+        s.asking = summary.asking
         return .session(s)
     }
     rows.sort(by: Inbox.bySeverity)
@@ -191,8 +255,8 @@ if CommandLine.arguments.contains("--dump") {
             project = Format.projectName(cwd: p.cwd, fallback: p.sessionId, name: nil)
             what = Format.askPhrase(p)
         case .session(let s):
-            project = Format.projectName(cwd: s.cwd, fallback: s.sessionId, name: s.name)
-            what = s.waitingFor ?? Format.subject(s, max: 60)
+            project = Format.label(s)
+            what = Format.headline(s, max: 60)
         }
         var phase: String?
         if case .session(let s) = row { phase = s.phase }

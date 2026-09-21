@@ -16,6 +16,9 @@ enum Transcript {
         /// only for sessions started after it was installed — the transcript has
         /// it for every session, in the same tail we are already reading.
         var prompt: String?
+        /// The newest tool call, when nothing has answered it yet: the thing a
+        /// blocked session is stopped on.
+        var asking: String?
     }
 
     /// One Read result can fill 64 KB on its own, and then the tail holds no
@@ -46,6 +49,11 @@ enum Transcript {
 
         switch tool {
         case "Bash":
+            // The model writes a description beside every command, and it is the
+            // sentence the command only implies.
+            if let said = str("description")?.trimmingCharacters(in: .whitespacesAndNewlines), !said.isEmpty {
+                return Format.oneLine(said)
+            }
             return "running " + (str("command").map(gist) ?? "a command")
         case "Read":
             return "reading " + (file() ?? "a file")
@@ -100,6 +108,7 @@ enum Transcript {
         cacheLock.unlock()
 
         var summary = Summary()
+        var answered = false
         if let buf = readTail(path, bytes: summaryTail) {
             for line in buf.split(separator: "\n", omittingEmptySubsequences: true).reversed() {
                 if summary.title != nil, summary.doing != nil, summary.saying != nil, summary.prompt != nil { break }
@@ -120,9 +129,11 @@ enum Transcript {
                 else { continue }
                 for block in content.reversed() {
                     let kind = block["type"] as? String
+                    if summary.doing == nil, kind == "tool_result" { answered = true }
                     if summary.doing == nil, kind == "tool_use", let name = block["name"] as? String {
                         let input = (block["input"] as? [String: Any]).flatMap(jsonValue)
                         summary.doing = describe(tool: name, input: input)
+                        if !answered { summary.asking = summary.doing }
                     }
                     if summary.saying == nil, type == "assistant", kind == "text",
                        let text = block["text"] as? String,
@@ -138,6 +149,119 @@ enum Transcript {
         cache[path] = Cached(at: Date(), summary: summary)
         cacheLock.unlock()
         return summary
+    }
+
+    /// The text of a user row, whichever of the two shapes it was written in.
+    private static func userText(_ row: [String: Any]) -> String? {
+        guard row["type"] as? String == "user", let message = row["message"] as? [String: Any] else { return nil }
+        if let text = message["content"] as? String { return text }
+        let blocks = message["content"] as? [[String: Any]] ?? []
+        return blocks.compactMap { $0["text"] as? String }.joined(separator: "\n")
+    }
+
+    private static func row(in data: Data, around hit: Range<Data.Index>) -> (row: [String: Any]?, start: Data.Index, stop: Data.Index) {
+        let start = data[..<hit.lowerBound].lastIndex(of: 0x0A).map { $0 + 1 } ?? data.startIndex
+        let stop = data[hit.upperBound...].firstIndex(of: 0x0A) ?? data.endIndex
+        return (try? JSONSerialization.jsonObject(with: data[start..<stop]) as? [String: Any], start, stop)
+    }
+
+    /// What the person asked for over the life of a session: the first two things
+    /// and the last two, which is where a piece of work gets named and renamed.
+    ///
+    /// Slash commands are read from their own rows. A bare one never reaches
+    /// `last-prompt`, and leaving it out named a session opened with
+    /// `/sky-verify-mine` after whatever it happened to be running: "Controller
+    /// tests".
+    static func prompts(of path: String?) -> [String] {
+        guard let path,
+              let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe)
+        else { return [] }
+        var found: [(at: Data.Index, text: String)] = []
+        for marker in ["\"type\":\"last-prompt\"", "<command-name>"] {
+            let needle = Data(marker.utf8)
+            var from = data.startIndex
+            while let hit = data.range(of: needle, in: from..<data.endIndex) {
+                let (row, start, stop) = row(in: data, around: hit)
+                if let row {
+                    let text = marker.hasPrefix("<")
+                        ? userText(row).flatMap(Format.command(in:))
+                        : Format.userPrompt(row["lastPrompt"] as? String)
+                    if let text { found.append((start, text)) }
+                }
+                from = stop
+            }
+        }
+        var all: [String] = []
+        for item in found.sorted(by: { $0.at < $1.at }) where all.last != item.text { all.append(item.text) }
+        return all.count <= 4 ? all : Array(all.prefix(2) + all.suffix(2))
+    }
+
+    nonisolated(unsafe) private static var commandCache: [String: String?] = [:]
+
+    /// The command a session was opened with, for a record that lost it. Read
+    /// once: a newer one reaches us through the bridge, which now keeps the step.
+    static func command(of path: String?) -> String? {
+        guard let path else { return nil }
+        cacheLock.lock()
+        if let hit = commandCache[path] {
+            cacheLock.unlock()
+            return hit
+        }
+        cacheLock.unlock()
+
+        var found: String?
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe) {
+            let needle = Data("<command-name>".utf8)
+            var end = data.endIndex
+            while found == nil, let hit = data.range(of: needle, options: .backwards, in: data.startIndex..<end) {
+                let (row, start, _) = row(in: data, around: hit)
+                found = row.flatMap(userText).flatMap(Format.command(in:))
+                end = start
+            }
+        }
+
+        cacheLock.lock()
+        commandCache[path] = found
+        cacheLock.unlock()
+        return found
+    }
+
+    nonisolated(unsafe) private static var issueCache: [String: String?] = [:]
+
+    /// The issue a session was given, for a record that lost it.
+    ///
+    /// The link is in the first prompt and a follow-up never repeats it, so a
+    /// session older than the bridge's `issue` field has nothing left in its
+    /// record. The whole file is read, once, and mapped rather than loaded: only
+    /// `last-prompt` rows count, because a tool result names other issues all day
+    /// and none of them is this session.
+    static func issue(of path: String?) -> String? {
+        guard let path else { return nil }
+        cacheLock.lock()
+        if let hit = issueCache[path] {
+            cacheLock.unlock()
+            return hit
+        }
+        cacheLock.unlock()
+
+        var found: String?
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: path), options: .mappedIfSafe) {
+            let marker = Data("\"type\":\"last-prompt\"".utf8)
+            var end = data.endIndex
+            while found == nil, let hit = data.range(of: marker, options: .backwards, in: data.startIndex..<end) {
+                let start = data[..<hit.lowerBound].lastIndex(of: 0x0A).map { $0 + 1 } ?? data.startIndex
+                let stop = data[hit.upperBound...].firstIndex(of: 0x0A) ?? data.endIndex
+                if let row = try? JSONSerialization.jsonObject(with: data[start..<stop]) as? [String: Any] {
+                    found = Format.issue(fromPrompt: row["lastPrompt"] as? String)
+                }
+                end = start
+            }
+        }
+
+        cacheLock.lock()
+        issueCache[path] = found
+        cacheLock.unlock()
+        return found
     }
 
     /// Everything the session has said since the last thing you said to it.

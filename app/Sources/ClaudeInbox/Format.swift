@@ -96,6 +96,110 @@ enum Format {
         return truncate(base ?? fallback ?? "unknown", Limits.project)
     }
 
+    /// The tracker issue a session is working on: `SKY-5463`.
+    ///
+    /// A link first, because it cannot be anything else; a bare key second,
+    /// because that is how a follow-up names it. Three digits at least —
+    /// "F3 WI-10 5427" is a real prompt, and a label that lies is worse than a
+    /// folder name.
+    static func issue(fromPrompt prompt: String?) -> String? {
+        guard let text = userPrompt(prompt) else { return nil }
+        let patterns: [(String, NSRegularExpression.Options)] = [
+            ("linear\\.app/[^/\\s]+/issue/([a-z][a-z0-9]*-\\d+)", [.caseInsensitive]),
+            ("\\b([A-Z][A-Z0-9]{1,9}-\\d{3,})\\b", []),
+        ]
+        for (pattern, options) in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: options),
+                  let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+                  let range = Range(match.range(at: 1), in: text)
+            else { continue }
+            return text[range].uppercased()
+        }
+        return nil
+    }
+
+    /// A model's reading of a turn's last message: does it need the person, and
+    /// the one line that says what for. Two lines are asked for — YES or NO, then
+    /// the line — and anything else is refused: a guess at urgency is the error
+    /// the state vocabulary exists to prevent.
+    static func parseAsk(_ raw: String?) -> (needsYou: Bool, line: String, replies: [String])? {
+        let lines = (raw ?? "").split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        guard lines.count >= 2,
+              let regex = try? NSRegularExpression(pattern: "^[\\s*_`\"'#]*(yes|no|да|нет)\\b", options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: lines[0], range: NSRange(lines[0].startIndex..., in: lines[0])),
+              let range = Range(match.range(at: 1), in: lines[0])
+        else { return nil }
+        let verdict = lines[0][range].lowercased()
+        let needsYou = verdict == "yes" || verdict == "да"
+        let line = plainText(lines[1].replacingOccurrences(of: "^\\s*\\d+[.)]\\s*", with: "", options: .regularExpression))
+        guard !line.isEmpty else { return nil }
+
+        // Up to three short answers the person is likely to give. They draft a
+        // reply; they never send one.
+        var replies: [String] = []
+        if needsYou, let offered = lines.dropFirst(2).first(where: {
+            $0.range(of: "^[\\s*_`]*repl(y|ies)\\s*:", options: [.regularExpression, .caseInsensitive]) != nil
+        }), let colon = offered.firstIndex(of: ":") {
+            replies = offered[offered.index(after: colon)...].split(separator: "|")
+                .map { plainText(String($0)) }.filter { !$0.isEmpty && $0.count <= 48 }
+            replies = Array(replies.prefix(3))
+        }
+        return (needsYou, line, replies)
+    }
+
+    /// Where a session belongs once its last message has been read. Only a turn
+    /// that has ended can be promoted: a session that moved on is not asking.
+    static func state(_ s: SessionRecord) -> InboxState {
+        if s.state == .idle, s.needsYou, let line = s.line, !line.isEmpty { return .blockedDialog }
+        return s.state
+    }
+
+    /// The one line of a session row.
+    ///
+    /// A blocked session is read for what it wants, and "Claude needs your
+    /// permission" is not that — it is the same sentence for every request there
+    /// has ever been. The tool call it is stopped on says it. Only a blocked row
+    /// is read this way: the registry's "input needed" on a session that is
+    /// working would otherwise wipe out the sentence about the work.
+    static func headline(_ s: SessionRecord, max: Int = Limits.subject) -> String {
+        guard s.state.isBlocked else {
+            // A turn that ended has been read, and the reading is a better line
+            // than the first eighty characters of a message that opens with a
+            // status header.
+            if s.state.group == .answered, let line = s.line, !line.isEmpty { return truncate(line, max) }
+            return subject(s, max: max)
+        }
+        if let asking = s.asking, !asking.isEmpty { return truncate(plainText(asking), max) }
+        if s.needsYou, let line = s.line, !line.isEmpty { return truncate(line, max) }
+        return s.waitingFor.map { truncate($0, max) } ?? subject(s, max: max)
+    }
+
+    /// What a model hands back when asked for a name, made safe to show.
+    ///
+    /// It is asked for one to three words and mostly obliges. When it does not —
+    /// it answers the prompt instead of naming it — the result is a sentence, and
+    /// a sentence in the label's place is worse than the session name it replaces.
+    static func cleanLabel(_ raw: String?) -> String? {
+        guard let first = raw?.split(whereSeparator: \.isNewline)
+            .map({ $0.trimmingCharacters(in: .whitespaces) }).first(where: { !$0.isEmpty })
+        else { return nil }
+        let text = oneLine(first.replacingOccurrences(
+            of: "^[\\s\"'`*«»“”#-]+|[\\s\"'`*«»“”.!]+$", with: "", options: .regularExpression))
+        guard !text.isEmpty, text.count <= 32, text.split(separator: " ").count <= 4 else { return nil }
+        return text
+    }
+
+    /// Which session a row is. Five sessions in one checkout are `skyaccess-ef`,
+    /// `-a1`, `-62` — names nobody chose. The issue is what the person calls the
+    /// work, so it wins; every surface asks here so that a banner and a row never
+    /// name the same session differently.
+    static func label(_ s: SessionRecord) -> String {
+        if let issue = s.issue, !issue.isEmpty { return truncate(issue, Limits.project) }
+        if let label = s.label, !label.isEmpty { return truncate(label, Limits.project) }
+        return projectName(cwd: s.cwd, fallback: s.sessionId, name: s.name)
+    }
+
     /// A path a person can read.
     ///
     /// `/private/var/folders/sz/n9zh8s2x…/T/tmp.3nRfVq8Ruf` is four lines of noise
@@ -152,6 +256,22 @@ enum Format {
         guard let text = prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
         if text.range(of: "^<[a-zA-Z][a-zA-Z0-9-]*>", options: .regularExpression) != nil { return nil }
         return text
+    }
+
+    /// `<command-name>/sky-verify-mine</command-name>` -> "/sky-verify-mine".
+    ///
+    /// How Claude Code stores a slash command in a transcript. A bare one is not
+    /// a `last-prompt` row at all — that row says null.
+    static func command(in text: String) -> String? {
+        func first(_ pattern: String) -> String? {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+                  let range = Range(match.range(at: 1), in: text)
+            else { return nil }
+            return String(text[range])
+        }
+        guard let name = first("<command-name>\\s*(/[^<\\s]+)\\s*</command-name>") else { return nil }
+        return oneLine(name + " " + (first("<command-args>([\\s\\S]*?)</command-args>") ?? ""))
     }
 
     static func phase(fromPrompt prompt: String?) -> String? {

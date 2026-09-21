@@ -8,13 +8,19 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { readSessionSummary, readTurnNarration } from "../lib/inbox";
+import { readCommand, readIssue, readSessionSummary, readTurnNarration } from "../lib/inbox";
 import {
   bySeverity,
+  cleanLabel,
+  headlineOf,
+  issueOf,
+  labelOf,
   lastSentence,
+  parseAsk,
   phaseOf,
   plainText,
   STATES,
+  stateOf,
   userPrompt,
   subjectOf,
   type InboxState,
@@ -40,6 +46,147 @@ describe("the step a session declared", () => {
     assert.equal(phaseOf("почини иконку в меню баре"), undefined);
     assert.equal(phaseOf(""), undefined);
     assert.equal(phaseOf(undefined), undefined);
+  });
+});
+
+describe("the issue a session is working on", () => {
+  it("reads the key out of a tracker link", () => {
+    // 1550 of 16832 prompts on this machine carry one, and the slug after the key
+    // is the part nobody says out loud.
+    assert.equal(
+      issueOf("/track https://linear.app/skyaccess/issue/SKY-5463/6-hide-single-pilot-legs это готово?"),
+      "SKY-5463",
+    );
+  });
+  it("reads a bare key, which is how a follow-up names it", () => {
+    assert.equal(issueOf("доделай SKY-4483 и запушь"), "SKY-4483");
+  });
+  it("finds it inside pasted content", () => {
+    assert.equal(
+      issueOf('<pasted_content id="439d">\nhttps://linear.app/skyaccess/issue/SKY-5968/sync\n</pasted_content id="439d">\n\n вот тебе еще'),
+      "SKY-5968",
+    );
+  });
+  it("prefers the link when a prompt has both", () => {
+    assert.equal(issueOf("как в SKY-1000, но для https://linear.app/skyaccess/issue/SKY-2000/x"), "SKY-2000");
+  });
+  it("does not mistake a code for an issue", () => {
+    // "F3 WI-10 5427" is a real prompt. A label that lies is worse than a folder name.
+    assert.equal(issueOf("F2 3986, F3 WI-10 5427"), undefined);
+    assert.equal(issueOf("перекодируй в UTF-8"), undefined);
+    assert.equal(issueOf("почини иконку в меню баре"), undefined);
+    assert.equal(issueOf(undefined), undefined);
+  });
+  it("is not read out of a system event", () => {
+    assert.equal(issueOf("<task-notification>agent on SKY-9999 finished</task-notification>"), undefined);
+  });
+});
+
+describe("which session a row is", () => {
+  it("is the issue when there is one", () => {
+    // Five sessions in one checkout are skyaccess-ef, -a1, -62: names nobody
+    // chose and nobody remembers. The issue is what the person calls the work.
+    const s = session({ state: "working", cwd: "/Users/me/work/skyaccess", name: "skyaccess-ef", issue: "SKY-5463" });
+    assert.equal(labelOf(s), "SKY-5463");
+  });
+  it("is a generated name when no issue was named", () => {
+    // "skyaccess-d5" against "GSC": one of these is how the person thinks of it.
+    const s = session({ state: "working", cwd: "/Users/me/work/skyaccess", name: "skyaccess-d5", label: "GSC" });
+    assert.equal(labelOf(s), "GSC");
+    assert.equal(labelOf({ ...s, issue: "SKY-1234" }), "SKY-1234");
+  });
+  it("falls back to the session name, then the folder", () => {
+    assert.equal(labelOf(session({ state: "working", cwd: "/Users/me/work/skyaccess", name: "skyaccess-ef" })), "skyaccess-ef");
+    assert.equal(labelOf(session({ state: "working", cwd: "/Users/me/work/skyaccess" })), "skyaccess");
+  });
+});
+
+describe("a turn that ended by asking", () => {
+  // Stop says a turn ended. It cannot say whether the session is done or is
+  // standing there with five decisions it needs — "Нужно твоё решение (без него
+  // «полный» не наступит)" was filed under Answered. Only the message knows, so
+  // a model reads it, once, and answers in two lines.
+  it("reads the verdict and the line", () => {
+    assert.deepEqual(parseAsk("YES\nНужно решение по 5 пунктам: promote R20 на прод, operator_name…"), {
+      needs_you: true,
+      line: "Нужно решение по 5 пунктам: promote R20 на прод, operator_name…",
+    });
+    assert.deepEqual(parseAsk("NO\nОба PR в CI, красный прогон на старом коде доказан."), {
+      needs_you: false,
+      line: "Оба PR в CI, красный прогон на старом коде доказан.",
+    });
+  });
+  it("carries the answers a person is likely to give, so one tap drafts the reply", () => {
+    // "го" is most of what gets typed back. The replies only ever fill the
+    // draft — a tap never sends — because an approval sent by a stray click is
+    // a tool call nobody approved.
+    assert.deepEqual(parseAsk("YES\nНужно «го» на план из трёх фаз\nREPLIES: Го по всем фазам | Только фаза 1 | Подожди, есть вопросы"), {
+      needs_you: true,
+      line: "Нужно «го» на план из трёх фаз",
+      replies: ["Го по всем фазам", "Только фаза 1", "Подожди, есть вопросы"],
+    });
+    // Nothing to answer, nothing to offer — whatever the model appended.
+    assert.deepEqual(parseAsk("NO\nCI is running.\nREPLIES: ok"), { needs_you: false, line: "CI is running." });
+  });
+  it("forgives the wrapping a model adds", () => {
+    assert.deepEqual(parseAsk("**Yes.**\n\n2) Нужно твоё «го» на сборку"), { needs_you: true, line: "Нужно твоё «го» на сборку" });
+  });
+  it("refuses what it cannot read, rather than guess at urgency", () => {
+    assert.equal(parseAsk("Сессия занимается синхронизацией HubSpot."), undefined);
+    assert.equal(parseAsk("YES"), undefined);
+    assert.equal(parseAsk(""), undefined);
+  });
+  it("moves the session to where a person looks first, saying what it needs", () => {
+    const s = session({ state: "idle", last_message: "Статус на 07:55Z — работа идёт…", needs_you: true, line: "Нужно решение по 5 пунктам" });
+    assert.equal(STATES[stateOf(s)].group, "waiting");
+    assert.equal(headlineOf({ ...s, state: stateOf(s) }), "Нужно решение по 5 пунктам");
+  });
+  it("leaves a finished turn that asks nothing where it was, with a better line", () => {
+    const s = session({ state: "idle", last_message: "Статус на 07:55Z — работа идёт. ## Заголовок", needs_you: false, line: "Оба PR в CI." });
+    assert.equal(stateOf(s), "idle");
+    assert.equal(headlineOf(s), "Оба PR в CI.");
+  });
+  it("never overrides a session that has moved on", () => {
+    const s = session({ state: "working", needs_you: true, line: "Нужно решение" , saying: "Закрываю тестами." });
+    assert.equal(stateOf(s), "working");
+    assert.equal(headlineOf(s), "Закрываю тестами.");
+  });
+});
+
+describe("the line of a blocked session", () => {
+  it("says what it wants, not that it wants something", () => {
+    const s = session({
+      state: "blocked.dialog",
+      waiting_for: "Claude needs your permission",
+      asking: "Prod: apply the approved heal on 22 Thrive legs",
+      saying: "Сейчас применю.",
+    });
+    assert.equal(headlineOf(s), "Prod: apply the approved heal on 22 Thrive legs");
+  });
+  it("falls back to the sentence Claude Code gave", () => {
+    assert.equal(headlineOf(session({ state: "blocked.dialog", waiting_for: "Claude needs your permission" })), "Claude needs your permission");
+  });
+  it("leaves a working session its own sentence", () => {
+    // The live registry says "input needed" about sessions that are not blocked.
+    const s = session({ state: "working", waiting_for: "input needed", saying: "Закрываю тестами." });
+    assert.equal(headlineOf(s), "Закрываю тестами.");
+  });
+});
+
+describe("what a model hands back when asked for a name", () => {
+  it("keeps the name and drops the wrapping", () => {
+    assert.equal(cleanLabel("GSC"), "GSC");
+    assert.equal(cleanLabel('"Pricing email".'), "Pricing email");
+    assert.equal(cleanLabel("**Иконка меню**\n"), "Иконка меню");
+  });
+  it("takes the first line, because the rest is the model talking", () => {
+    assert.equal(cleanLabel("Разница pricing\n\nЯ не имею доступа к Linear, чтобы проверить статус."), "Разница pricing");
+  });
+  it("refuses a sentence, which is an answer and not a name", () => {
+    // A wrong label is worse than the session name it would replace.
+    assert.equal(cleanLabel("Я не имею доступа к Linear, чтобы проверить статус задачи"), undefined);
+    assert.equal(cleanLabel(""), undefined);
+    assert.equal(cleanLabel(undefined), undefined);
   });
 });
 
@@ -244,6 +391,38 @@ describe("reading a transcript for the title and the current move", () => {
 
   const says = (text: string) => ({ type: "assistant", message: { content: [{ type: "text", text }] } });
 
+  it("finds the issue a session was given before anyone was keeping it", async () => {
+    // The link is in the first prompt and the follow-ups never repeat it, so by
+    // the time the bridge learns to keep it the record has already lost it.
+    const path = await transcript([
+      { type: "last-prompt", lastPrompt: "/track https://linear.app/skyaccess/issue/SKY-4483/10-resolve-pricing это готово?" },
+      toolUse("Bash", { command: "linear issue view SKY-1111" }),
+      // A tool result names other issues all day; none of them is this session.
+      { type: "user", message: { content: [{ type: "tool_result", content: "related: https://linear.app/skyaccess/issue/SKY-7777/x" }] } },
+      { type: "last-prompt", lastPrompt: "да, пуш" },
+    ]);
+    assert.equal(await readIssue(path), "SKY-4483");
+    assert.equal(await readIssue(await transcript([{ type: "last-prompt", lastPrompt: "почини иконку" }])), undefined);
+    assert.equal(await readIssue(undefined), undefined);
+  });
+
+  it("finds the command a session was opened with", async () => {
+    // A bare slash command is not a `last-prompt` row — that row says null — so
+    // the one declaration of intent in the file is in a place nothing was reading.
+    const path = await transcript([
+      { type: "last-prompt", lastPrompt: null },
+      { type: "user", message: { content: "<command-message>sky-verify-mine</command-message>\n<command-name>/sky-verify-mine</command-name>" } },
+      { type: "user", message: { content: [{ type: "text", text: "# /sky-verify-mine\n\nTake every issue assigned…" }] } },
+      { type: "last-prompt", lastPrompt: "доделывай всё что быстро" },
+    ]);
+    assert.equal(await readCommand(path), "/sky-verify-mine");
+    const withArgs = await transcript([
+      { type: "user", message: { content: "<command-name>/morgan:track</command-name>\n<command-args>fix the icon</command-args>" } },
+    ]);
+    assert.equal(await readCommand(withArgs), "/morgan:track fix the icon");
+    assert.equal(await readCommand(await transcript([{ type: "last-prompt", lastPrompt: "hi" }])), undefined);
+  });
+
   it("finds the newest of everything in one pass", async () => {
     const path = await transcript([
       { type: "ai-title", aiTitle: "Старый заголовок" },
@@ -272,6 +451,16 @@ describe("reading a transcript for the title and the current move", () => {
   it("takes the newest sentence when a turn has several", async () => {
     const path = await transcript([says("Сначала это."), toolUse("Bash", { command: "ls" }), says("Теперь то.")]);
     assert.equal((await readSessionSummary(path)).saying, "Теперь то.");
+  });
+
+  it("says a command the way the model said it", async () => {
+    // Every Bash call carries a description the model wrote — 185 of 185 on the
+    // day this was checked — and the command beside it read
+    // `running SP=/private/tmp/claude-501/…`.
+    const path = await transcript([
+      toolUse("Bash", { command: "SP=/private/tmp/x; cd $SP\ncat > p7.sh <<'EOF'\nls\nEOF", description: "Prod read-only: confirm deployed guards" }),
+    ]);
+    assert.equal((await readSessionSummary(path)).doing, "Prod read-only: confirm deployed guards");
   });
 
   it("drops the cd that every command starts with", async () => {

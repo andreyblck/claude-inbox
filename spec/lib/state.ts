@@ -55,7 +55,7 @@ export const STATES: Record<InboxState, StateMeta> = {
 const GROUP_ORDER: Record<StateGroup, number> = { waiting: 0, answered: 1, running: 2, finished: 3 };
 
 export const GROUP_TITLES: Record<StateGroup, string> = {
-  waiting: "Waiting for you",
+  waiting: "Waiting for You",
   answered: "Answered",
   running: "Running",
   finished: "Recently finished",
@@ -129,6 +129,16 @@ export type SessionRecord = {
   demo?: boolean;
   /** The step the session is on, when it declared one: "track", "pull", "clean". */
   phase?: string;
+  /** The tracker issue the session is working on, e.g. "SKY-5463". */
+  issue?: string | null;
+  /** A short generated name for a session that named no issue: "GSC". */
+  label?: string | null;
+  /** The tool call a blocked session is stopped on, in the model's own words. */
+  asking?: string | null;
+  /** Whether the turn ended by asking the person for something. See `parseAsk`. */
+  needs_you?: boolean;
+  /** What it asks for, or — when it asks nothing — what landed. One line. */
+  line?: string | null;
   /** What the person last asked for. Arrives free on UserPromptSubmit. */
   last_prompt?: string | null;
   /** Claude Code's own generated title for the session, from the transcript. */
@@ -308,6 +318,107 @@ export function userPrompt(prompt?: string | null): string | undefined {
   // person's words and they are not a person's words; showing one as the subject
   // of a row is showing plumbing.
   if (/^<[a-z][a-z0-9-]*>/i.test(text)) return undefined;
+  return text;
+}
+
+/**
+ * The tracker issue a session is working on: `SKY-5463`.
+ *
+ * A link first, because it cannot be anything else; a bare key second, because
+ * that is how a follow-up names it. Three digits at least — "F3 WI-10 5427" is a
+ * real prompt, and a label that lies is worse than a folder name.
+ */
+export function issueOf(raw?: string | null): string | undefined {
+  const prompt = userPrompt(raw);
+  if (!prompt) return undefined;
+  const match =
+    /linear\.app\/[^/\s]+\/issue\/([a-z][a-z0-9]*-\d+)/i.exec(prompt) ??
+    /\b([A-Z][A-Z0-9]{1,9}-\d{3,})\b/.exec(prompt);
+  return match?.[1].toUpperCase();
+}
+
+/**
+ * Which session a row is. Five sessions in one checkout are `skyaccess-ef`,
+ * `-a1`, `-62` — names nobody chose. The issue is what the person calls the work.
+ */
+export function labelOf(session: SessionRecord): string {
+  if (session.issue) return truncate(session.issue, LIMITS.project);
+  if (session.label) return truncate(session.label, LIMITS.project);
+  return projectName(session.cwd, session.session_id, session.name);
+}
+
+/**
+ * A model's reading of a turn's last message: does it need the person, and the
+ * one line that says what for.
+ *
+ * `Stop` says a turn ended and nothing else. A session standing there with five
+ * decisions it needs looks exactly like one that is done, and was filed under
+ * Answered. The reply is asked for as two lines — YES or NO, then the line — and
+ * anything else is refused: a guess at urgency is the error this vocabulary
+ * exists to prevent.
+ */
+export function parseAsk(
+  raw?: string | null,
+): { needs_you: boolean; line: string; replies?: string[] } | undefined {
+  const lines = (raw ?? "").split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length < 2) return undefined;
+  const verdict = /^[\s*_`"'#]*(yes|no|да|нет)\b/i.exec(lines[0])?.[1].toLowerCase();
+  if (!verdict) return undefined;
+  const line = plainText(lines[1].replace(/^\s*\d+[.)]\s*/, ""));
+  if (!line) return undefined;
+  const needs_you = verdict === "yes" || verdict === "да";
+  // Up to three short answers the person is likely to give. They draft a reply;
+  // they never send one.
+  const offered = lines.slice(2).map((l) => /^[\s*_`]*repl(?:y|ies)\s*:\s*(.+)$/i.exec(l)?.[1]).find(Boolean);
+  const replies = needs_you
+    ? (offered ?? "").split("|").map((r) => plainText(r)).filter((r) => r.length > 0 && r.length <= 48).slice(0, 3)
+    : [];
+  return replies.length ? { needs_you, line, replies } : { needs_you, line };
+}
+
+/**
+ * Where a session belongs once its last message has been read. Only a turn that
+ * has ended can be promoted: a session that moved on is no longer asking.
+ */
+export function stateOf(session: SessionRecord): InboxState {
+  if (session.state === "idle" && session.needs_you && session.line) return "blocked.dialog";
+  return session.state;
+}
+
+/**
+ * The one line of a session row.
+ *
+ * A blocked session is read for what it wants, and "Claude needs your
+ * permission" is not that — it is the same sentence for every request there has
+ * ever been. The tool call it is stopped on says it. Only a blocked row is read
+ * this way: the registry's "input needed" on a session that is working would
+ * otherwise wipe out the sentence about the work.
+ */
+export function headlineOf(session: SessionRecord, max: number = LIMITS.subject): string {
+  const group = STATES[session.state].group;
+  if (group !== "waiting") {
+    // A turn that ended has been read, and the reading is a better line than the
+    // first eighty characters of a message that opens with a status header.
+    if (group === "answered" && session.line) return truncate(session.line, max);
+    return subjectOf(session, max);
+  }
+  if (session.asking) return truncate(plainText(session.asking), max);
+  if (session.needs_you && session.line) return truncate(session.line, max);
+  return session.waiting_for ? truncate(session.waiting_for, max) : subjectOf(session, max);
+}
+
+/**
+ * What a model hands back when asked for a name, made safe to show.
+ *
+ * It is asked for one to three words and mostly obliges. When it does not — it
+ * answers the prompt instead of naming it — the result is a sentence, and a
+ * sentence in the label's place is worse than the session name it would replace.
+ */
+export function cleanLabel(raw?: string | null): string | undefined {
+  const first = raw?.split("\n").map((l) => l.trim()).find((l) => l.length > 0);
+  if (!first) return undefined;
+  const text = oneLine(first.replace(/^[\s"'`*«»“”#-]+|[\s"'`*«»“”.!]+$/g, ""));
+  if (!text || text.length > 32 || text.split(" ").length > 4) return undefined;
   return text;
 }
 

@@ -10,6 +10,8 @@ final class InboxStore {
     private(set) var usage: [UsageRecord] = []
     private(set) var bridgeInstalled = true
     private(set) var loadedOnce = false
+    /// Whether the panel is on screen. Anything that moves only moves then.
+    var panelVisible = false
 
     /// The expensive reads, for the one row being looked at.
     private(set) var openRowID: String?
@@ -29,7 +31,14 @@ final class InboxStore {
         // The directory is the protocol, so watching it is the notification: no
         // deeplink to fire, nothing to wake, no error toast when the other end is
         // not there. The timer is only for the clocks — "2m" has to become "3m".
-        watcher = DirectoryWatcher(paths: [Inbox.directory]) { [weak self] in
+        // Only what the bridge writes. Watching the whole directory meant
+        // watching our own heartbeat, which every read rewrote: a read caused a
+        // write caused a read, four times a second, at a quarter to a half of a
+        // core — and each pass redrew the list under whoever was typing in it.
+        let watched = ["sessions", "pending", "usage"].map {
+            (Inbox.directory as NSString).appendingPathComponent($0)
+        }
+        watcher = DirectoryWatcher(paths: watched) { [weak self] in
             Task { @MainActor in self?.reload() }
         }
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
@@ -56,7 +65,38 @@ final class InboxStore {
                 s.saying = summary.saying
                 s.lastPrompt = s.lastPrompt ?? summary.prompt
                 s.phase = s.phase ?? Format.phase(fromPrompt: s.lastPrompt)
+                    ?? Format.phase(fromPrompt: Transcript.command(of: s.transcriptPath))
+                s.issue = s.issue ?? Format.issue(fromPrompt: s.lastPrompt)
+                    ?? Transcript.issue(of: s.transcriptPath)
+                // A turn that ended is read once: is it done, or is it standing
+                // there needing a decision? Only a live session is worth asking
+                // about, and only `Stop` leaves one in this state.
+                if s.state == .idle, s.pid != nil, s.demo != true, let message = s.lastMessage, !message.isEmpty {
+                    if let reading = Asks.cached(s.sessionId, message: message) {
+                        s.needsYou = reading.needsYou
+                        s.line = reading.line
+                        s.replies = reading.replies ?? []
+                    } else {
+                        Asks.want(s.sessionId, message: message) { Task { @MainActor [weak self] in self?.reload() } }
+                    }
+                }
+                s.label = s.label ?? Labels.cached(s.sessionId)
+                s.state = Format.state(s)
+                Linear.remember(from: s.lastPrompt)
+                if s.issue != nil, Linear.url(for: s.issue) == nil {
+                    Linear.remember(from: Transcript.prompts(of: s.transcriptPath).joined(separator: "\n"))
+                }
+                s.search = [Format.label(s), Format.projectName(cwd: s.cwd, fallback: s.sessionId, name: s.name),
+                            Format.headline(s, max: 300), Format.subject(s, max: 300), s.phase ?? "", s.issue ?? ""]
+                    .joined(separator: " ").lowercased()
+                s.unread = s.state.group == .answered && !Reads.isRead(s.sessionId, ts: s.ts)
+                // Only for a session still running: a name for one that is over
+                // is ten seconds of quota spent on something nobody will read.
+                if s.issue == nil, s.label == nil, s.pid != nil, s.demo != true {
+                    Labels.want(s) { Task { @MainActor [weak self] in self?.reload() } }
+                }
                 if let doing = summary.doing { s.activity = [doing] }
+                s.asking = summary.asking
                 return .session(s)
             }
             rows.sort(by: Inbox.bySeverity)
@@ -87,6 +127,14 @@ final class InboxStore {
             return
         }
         openRowID = row.id
+        if case .session(let s) = row, s.unread {
+            Reads.mark(s.sessionId, ts: s.ts)
+            rows = rows.map { other in
+                guard case .session(var o) = other, o.sessionId == s.sessionId else { return other }
+                o.unread = false
+                return .session(o)
+            }
+        }
         let path = row.transcriptPath
         Task.detached(priority: .userInitiated) {
             let narration = Transcript.narration(of: path)
@@ -162,6 +210,11 @@ final class InboxStore {
                 }
             }
         }
+    }
+
+    func rename(_ sessionId: String, to label: String) {
+        Labels.set(sessionId, label: label)
+        reload()
     }
 
     func decide(_ row: Row, allow: Bool) {

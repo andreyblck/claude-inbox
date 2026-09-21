@@ -85,8 +85,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             guard session.demo != true else { continue }
             post(
                 id: session.sessionId,
-                title: Format.projectName(cwd: session.cwd, fallback: session.sessionId, name: session.name),
-                body: session.waitingFor ?? "wants your input",
+                title: Format.label(session),
+                body: Format.headline(session, max: 120),
                 answerable: false)
         }
     }

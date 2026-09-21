@@ -153,6 +153,8 @@ enum Inbox {
                 else { continue }
                 // Daemons and workers share this directory and are not sessions.
                 if let kind = row.kind, !humanKinds.contains(kind) { continue }
+                // Our own question to `claude`, not a session anyone is having.
+                if ((row.cwd ?? "") as NSString).lastPathComponent.hasPrefix(ClaudeCLI.scratchPrefix) { continue }
                 guard isAlive(pid: row.pid, startedAt: row.startedAt) else { continue }
 
                 var record = SessionRecord(
@@ -192,6 +194,7 @@ enum Inbox {
                 let terminal = record.state == .done || record.state == .failed
                 let useHooked = terminal || record.ts >= alive.ts
                 alive.phase = record.phase ?? alive.phase
+                alive.issue = record.issue ?? alive.issue
                 alive.lastMessage = record.lastMessage ?? alive.lastMessage
                 alive.lastPrompt = record.lastPrompt ?? alive.lastPrompt
                 alive.transcriptPath = record.transcriptPath ?? alive.transcriptPath
@@ -255,9 +258,15 @@ enum Inbox {
     /// A permission hook blocks for its whole timeout waiting for a verdict. With
     /// nothing listening that is a dead freeze before every prompt, for an answer
     /// that was never coming.
+    nonisolated(unsafe) private static var lastBeat: TimeInterval = 0
+
+    /// The hook treats a beat younger than a minute as "someone is listening", so
+    /// one every few seconds says everything a beat on every read would.
     static func touchHeartbeat() {
-        let now = String(Int(Date().timeIntervalSince1970))
+        let now = Date().timeIntervalSince1970
+        guard now - lastBeat >= 5 else { return }
+        lastBeat = now
         try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        try? now.write(toFile: path("heartbeat"), atomically: true, encoding: .utf8)
+        try? String(Int(now)).write(toFile: path("heartbeat"), atomically: true, encoding: .utf8)
     }
 }

@@ -33,7 +33,7 @@ enum StateGroup: Int, Comparable, Sendable, CaseIterable {
 
     var title: String {
         switch self {
-        case .waiting: "Waiting for you"
+        case .waiting: "Waiting for You"
         case .answered: "Answered"
         case .running: "Running"
         case .finished: "Recently finished"

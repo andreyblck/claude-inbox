@@ -76,6 +76,16 @@ describe("who is alive", () => {
     assert.equal(byId.waiting?.waiting_for, "input needed");
   });
 
+  it("leaves out the questions the app itself asks", async () => {
+    // Naming a session is a `claude -p` run, and it registers like any other —
+    // so for ten seconds the panel listed its own plumbing as somebody's work.
+    await registryWith([
+      { pid: process.pid, sessionId: "ask", cwd: "/private/var/folders/x/T/claude-inbox-ask-1F2E", kind: "interactive", status: "busy", startedAt },
+      { pid: process.pid, sessionId: "real", cwd: "/Users/me/work/claude-inbox", kind: "interactive", status: "busy", startedAt },
+    ]);
+    assert.deepEqual((await readLiveSessions()).sessions.map((s) => s.session_id), ["real"]);
+  });
+
   it("leaves daemons out: they are machinery, not sessions", async () => {
     await registryWith([
       { pid: process.pid, sessionId: "worker", cwd: "/x", kind: "daemon-worker", status: "busy", startedAt },

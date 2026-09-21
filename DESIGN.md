@@ -110,8 +110,26 @@ Rules that keep it from turning into mush:
    back is the answer — take the last sentence, unless it is too short to stand
    alone. And strip the markdown: the model writes `**bold**` and backticks, and
    a menu renders neither.
-2. **Project** = basename of `cwd` (or the session name when set), 18 chars max.
-   Never a path, never a UUID.
+2. **Which session** = the tracker issue when one was named (`SKY-5463`), else a
+   short generated name (`GSC`), else the session name, else the basename of
+   `cwd`. 18 chars max. Never a path, never a UUID.
+
+   Five sessions in one checkout are `skyaccess-ef`, `-a1`, `-62` — names nobody
+   chose and nobody remembers. The issue is what the person calls the work. It is
+   read from a link in what they typed, or a bare key of three digits or more
+   (`WI-10` is a real string in a real prompt, and is not an issue); never from
+   what a tool printed, which names other issues all day. It is named once and
+   kept until a newer one is, because a follow-up never repeats it. Every surface
+   — row, banner, digest — asks the same function, so none of them names a
+   session differently from another.
+
+   The generated name is the one place a model is asked for anything a row
+   shows. It is asked once per session, by the `claude` already on the machine,
+   off to the side and never on the way to a redraw — a row shows the session
+   name until it lands, about seven seconds later — and it is kept on disk so it
+   does not change between launches. What comes back is one to three words or it
+   is thrown away: a model that answers the prompt instead of naming it returns
+   a sentence, and a sentence there is worse than `skyaccess-d5`.
 3. **What** = for a blocked session, a lowercase verb phrase, 28 chars max:
    `run rm -rf dist`, `pick one of 3`, `approve plan`.
 
@@ -125,7 +143,7 @@ Rules that keep it from turning into mush:
    | the model's own sentence | `Закрываю тестами.` | newest assistant text in the transcript |
    | what was last asked | `дособери фичу` | `prompt` on `UserPromptSubmit`, or `last-prompt` in the transcript |
    | Claude Code's title | `Optics для pricing review email` | `ai-title`, rewritten each turn |
-   | what it is touching | `running npm test` | newest `tool_use` in the transcript |
+   | what it is touching | `Run the bridge selftest` | newest `tool_use` in the transcript: the description the model wrote beside the command, and `running npm test` only when it wrote none |
    | what landed | `Shipped. Tests pass, PR opened.` | `last_assistant_message` on `Stop` |
    | the state | `working` | last resort, and an admission we know nothing |
 
@@ -133,6 +151,34 @@ Rules that keep it from turning into mush:
    writes a sentence about what it is about to do before it does it. It is
    already there, already in the person's language, and costs neither a token nor
    a millisecond. Generating a summary would be slower, dearer and no better.
+
+It holds for a session that is running. It does not hold for a turn that has
+ended: `Stop` says a turn ended and nothing else, and a session standing there
+with five decisions it needs — "Нужно твоё решение (без него «полный» не
+наступит)" — was filed under Answered, beside the ones that were simply done.
+Only the message knows the difference, so it is read, once per message, by the
+`claude` already on the machine: YES or NO, and one line. YES moves the row to
+*Waiting for you* with the line as what it says, and sends a banner that says the
+same. NO leaves it where it was, with the line in place of the first eighty
+characters of a message that opened with a status header. Waiting on CI, on a
+background agent or on a timer is NO — the session will wake itself. A reply that
+is not those two lines is thrown away and the row stays put: a guess at urgency
+is the error the vocabulary exists to prevent.
+
+With a YES come up to three answers the person is likely to give, in the
+session's language — "го", "только фаза 1", "есть вопросы". A tap drafts one into
+the note field and stops there. It never sends: an approval that went out on a
+stray click is a decision nobody made.
+
+The other half of the same rule is in the bridge. `Notification` arrives for two
+different things: `permission_prompt`, which is a block, and `idle_prompt`, which
+is a minute of nobody typing after a turn ended — 7 of the first 9 captured — and
+is not. The second changes neither the state nor its age.
+
+That holds for the sentence and not for the name: nothing in a transcript says
+`GSC`, so the name in rule 2 is generated. It also holds less than it did —
+measured a day later, sessions on a thinking model wrote a text block in 8 of
+100 assistant rows against 17, and a row with no sentence falls to the prompt.
 
    The title is deliberately *below* the prompt: it summarises how the session
    opened, so a session that began "Давай давай давай" is titled that forever.
@@ -244,3 +290,22 @@ rotation whose purpose is to carry on past one plan's limit is the part that rea
 as working around the limit, and that is a terms question rather than a technical
 one. The switcher is built so either policy works; the product does not pick the
 aggressive one on the user's behalf.
+
+## Signs the Mac already uses
+
+A state is shown with the sign the system already uses for the same thing, so
+nobody has to learn ours. A session at work is the three dots of someone typing.
+An answer nobody has opened is the blue dot Mail puts on an unread message, and
+opening the row is reading it; it is new again when the turn is. A session that
+needs you is a white mark on its colour, and bounces once when it starts to. A row
+that has needed you for more than ten minutes says its age in orange — the only
+place colour is used for anything but state.
+
+Rows move between groups rather than jump, and counts roll rather than swap: a
+list that reshuffles under the eye has to be re-read from the top.
+
+Everything a row can do is on its right click — open the issue, go to the
+terminal, copy the answer, the resume command or the key, show the folder, rename
+— and the two used most are on the keyboard: ⌘L and ⌘T. "Go to Terminal" brings
+the app the session runs in forward. Which tab is the terminal's business, and
+most terminals offer no way to ask for one; the window is what can be promised.

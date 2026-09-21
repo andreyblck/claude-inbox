@@ -10,29 +10,6 @@ import Foundation
 /// its own: the account, the auth and the quota are the ones already set up, and
 /// there is nothing extra to configure or to leak.
 enum Digest {
-    enum Failure: Error, LocalizedError {
-        case noCLI
-        case failed(String)
-
-        var errorDescription: String? {
-            switch self {
-            case .noCLI: "The `claude` command is not on PATH."
-            case .failed(let why): why
-            }
-        }
-    }
-
-    private static var executable: String? {
-        for path in [
-            NSHomeDirectory() + "/.local/bin/claude",
-            "/opt/homebrew/bin/claude",
-            "/usr/local/bin/claude",
-        ] where FileManager.default.isExecutableFile(atPath: path) {
-            return path
-        }
-        return nil
-    }
-
     /// What the model is given. Deliberately only what is already on screen:
     /// state, project, and what each session last said.
     static func brief(for rows: [Row]) -> String {
@@ -45,7 +22,7 @@ enum Digest {
                 }
                 continue
             }
-            let project = Format.projectName(cwd: s.cwd, fallback: s.sessionId, name: s.name)
+            let project = Format.label(s)
             let said = (s.lastMessage ?? s.saying).map { Format.plainText($0).prefix(700) } ?? ""
             lines.append("- [\(s.state.label.uppercased())] \(project): \(said)")
         }
@@ -60,62 +37,23 @@ enum Digest {
     /// synchronous signature says what it is and forces the caller to say where
     /// it runs.
     static func make(for rows: [Row]) throws -> String {
-        guard let executable else { throw Failure.noCLI }
         let brief = Self.brief(for: rows)
         guard !brief.isEmpty else { return "Nothing is running." }
 
         let prompt = """
-            Ниже — состояние параллельных сессий Claude Code одного человека, \
-            который только что вернулся к машине. Для каждой: состояние, проект и \
-            то, что она сказала последним.
+            Below is the state of one person's parallel Claude Code sessions. They \
+            have just come back to the machine. For each: its state, which one it is, \
+            and the last thing it said.
 
-            Напиши короткую сводку — что произошло и что требует его внимания. \
-            Правила: пиши на языке, на котором написаны сами сессии. Не пересказывай \
-            всё подряд — назови то, что изменилось и то, что застряло. Сначала то, \
-            что ждёт решения, потом что доделано, потом что идёт. Никаких \
-            вступлений и никаких предложений помощи. Максимум 8 строк.
+            Write a short digest — what happened and what needs their attention. \
+            Write in the language the sessions themselves are written in. Do not \
+            retell everything: name what changed and what is stuck. First what is \
+            waiting on a decision, then what got done, then what is in progress. No \
+            preamble and no offers of help. Eight lines at most.
 
             \(brief)
             """
 
-        // The digest session would otherwise report itself into the inbox it is
-        // summarising. Pointing its hooks at a throwaway directory keeps it out
-        // of its own reading.
-        let scratch = FileManager.default.temporaryDirectory
-            .appendingPathComponent("claude-inbox-digest-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: scratch) }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = [
-            "-p", prompt,
-            "--model", "claude-haiku-4-5-20251001",
-            "--max-turns", "1",
-            "--permission-prompts", "none",
-            "--output-format", "text",
-        ]
-        var environment = ProcessInfo.processInfo.environment
-        environment["CLAUDE_INBOX_DIR"] = scratch.path
-        process.environment = environment
-
-        let out = Pipe()
-        process.standardOutput = out
-        process.standardError = FileHandle.nullDevice
-        // Without this the child inherits a stdin that never closes and can sit
-        // waiting on it forever.
-        process.standardInput = FileHandle.nullDevice
-        process.currentDirectoryURL = scratch
-
-        do { try process.run() } catch { throw Failure.failed(error.localizedDescription) }
-        let data = try? out.fileHandleForReading.readToEnd()
-        process.waitUntilExit()
-
-        let text = String(decoding: data ?? Data(), as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard process.terminationStatus == 0, !text.isEmpty else {
-            throw Failure.failed("The digest did not come back. Quota or auth, most likely.")
-        }
-        return text
+        return try ClaudeCLI.ask(prompt)
     }
 }
