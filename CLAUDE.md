@@ -66,6 +66,10 @@ in `decision.updatedInput`; see `PLAN.md` and the spike.
 - **A `Row.id` is composed** (`session:<id>`, `pending:<req>`) while a notification carries the
   bare id. Match with `Row.answers(to:)`, never `== row.id` — that mismatch is why a tapped
   banner did nothing for two releases.
+- **The sweep must read the turn, not the record.** Claude Code fires a `Notification` about the
+  very request the hook is waiting on. Treating any newer session record as "answered elsewhere"
+  deleted every question card the instant it appeared. Only `UserPromptSubmit`, `Stop` and
+  `SessionEnd` mean the turn moved on.
 - **A question is not a permission.** 20s is a liveness budget for "may I run this"; a question
   is read and thought about. `CLAUDE_INBOX_ANSWER_TIMEOUT` (300s) covers question/plan, and the
   hook entry's `timeout` in settings.json has to cover the longer of the two or Claude Code kills

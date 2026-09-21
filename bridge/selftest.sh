@@ -100,6 +100,16 @@ printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-20","cwd":"/x
   > "$CLAUDE_INBOX_DIR/pending/fresh.json"
 printf '%s' '{"hook_event_name":"Stop","session_id":"s-20","cwd":"/x","last_assistant_message":"answered it myself"}' | ./hook-session.sh
 check "settled row swept"   "$([ -f "$CLAUDE_INBOX_DIR/pending/stale.json" ] && echo kept || echo gone)" "gone"
+# The sequence that actually happens, rather than the one that is easy to
+# imagine: Claude Code announces the very request being waited on, and that
+# announcement must not be read as "the turn went on without us". Taking it that
+# way deleted every question card the instant it appeared.
+/usr/bin/jq -n --argjson ts "$(( $(date +%s) - 60 ))" --argjson pid "$$" '{req:"asked", kind:"question", state:"blocked.question", ts:$ts, session_id:"s-21", pid:$pid}' \
+  > "$CLAUDE_INBOX_DIR/pending/asked.json"
+printf '%s' '{"hook_event_name":"Notification","session_id":"s-21","cwd":"/x","message":"Claude needs your permission","notification_type":"permission_prompt"}' | ./hook-session.sh
+check "announcement keeps it" "$([ -f "$CLAUDE_INBOX_DIR/pending/asked.json" ] && echo kept || echo gone)" "kept"
+printf '%s' '{"hook_event_name":"Stop","session_id":"s-21","cwd":"/x","last_assistant_message":"done"}' | ./hook-session.sh
+check "end of turn clears it" "$([ -f "$CLAUDE_INBOX_DIR/pending/asked.json" ] && echo kept || echo gone)" "gone"
 check "open row kept"       "$([ -f "$CLAUDE_INBOX_DIR/pending/fresh.json" ] && echo kept || echo gone)" "kept"
 rm -f "$CLAUDE_INBOX_DIR"/pending/fresh.json
 

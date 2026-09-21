@@ -89,14 +89,25 @@ inbox_reap() {
   done
   # Answered in the terminal instead. The hook is still waiting and its pending
   # file is still a row, so the panel would show a question that is already
-  # settled — for as long as the wait lasts. The session's own record moving on
-  # is the tell: it only advances when the turn does.
+  # settled — for as long as the wait lasts.
+  #
+  # The tell has to be an event that means the *turn* moved on, not any touch of
+  # the record. Claude Code fires a Notification about the very request being
+  # waited on: taking that as "answered elsewhere" deleted every question card
+  # the instant it appeared, which is worse than the staleness it was meant to
+  # prevent. Only a prompt, the end of a turn, or the end of the session count.
   for f in "$INBOX_DIR"/pending/*.json; do
     [ -f "$f" ] || continue
     sid=$("$JQ" -r '.session_id // empty' "$f" 2>/dev/null) || continue
     [ -n "$sid" ] || continue
+    rec="$INBOX_DIR/sessions/$sid.json"
+    [ -f "$rec" ] || continue
+    case "$("$JQ" -r '.event // empty' "$rec" 2>/dev/null)" in
+      UserPromptSubmit|Stop|SessionEnd) ;;
+      *) continue ;;
+    esac
     pts=$("$JQ" -r '.ts // 0' "$f" 2>/dev/null)
-    sts=$("$JQ" -r '.ts // 0' "$INBOX_DIR/sessions/$sid.json" 2>/dev/null) || continue
+    sts=$("$JQ" -r '.ts // 0' "$rec" 2>/dev/null) || continue
     case "$pts$sts" in *[!0-9]*) continue ;; esac
     [ "$sts" -gt "$pts" ] && rm -f "$f" 2>/dev/null
   done
