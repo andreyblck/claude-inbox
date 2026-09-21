@@ -227,6 +227,10 @@ final class InboxStore {
         }
     }
 
+    /// Only `--snapshot` calls this: a digest otherwise costs a model call, and a
+    /// layout that only breaks with one in it needs to be reproducible without.
+    func showDigest(_ text: String) { digest = text }
+
     func clearDigest() {
         digest = nil
         problem = nil

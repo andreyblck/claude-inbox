@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 }
 
-// `--snapshot out.png [--light] [--open N]` draws the panel into a file, on the
+// `--snapshot out.png [--light] [--open N] [--digest TEXT]` draws the panel into a file, on the
 // real inbox. A design judged from a description of it is a design nobody has
 // looked at; this is how the panel gets looked at without a person holding a
 // screenshot key. The backdrop stands in for a blurred wallpaper, because a
@@ -208,6 +208,9 @@ if let flag = CommandLine.arguments.firstIndex(of: "--snapshot"), CommandLine.ar
         let deadline = Date().addingTimeInterval(4)
         while !store.loadedOnce, Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
         if let openIndex, store.rows.indices.contains(openIndex) { store.open(store.rows[openIndex]) }
+        if let at = CommandLine.arguments.firstIndex(of: "--digest"), CommandLine.arguments.count > at + 1 {
+            store.showDigest(CommandLine.arguments[at + 1])
+        }
 
         let host = NSHostingView(rootView: InboxView(store: store))
         let backdrop = NSView(frame: NSRect(x: 0, y: 0, width: Theme.panelWidth, height: 900))

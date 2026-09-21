@@ -339,3 +339,17 @@ A control answers the press. A plain button gives no sign it was touched, which
 on an option that commits an answer is the one place silence is unaffordable —
 so an option row fills under the pointer, fills harder while held, and settles
 rather than snapping back.
+
+## The panel has a budget, and everything is in it
+
+The list used to be the only thing capped, so a summary above it was added to a
+panel that was already as tall as it was allowed to be. With one open the panel
+reached 1005pt, macOS clipped it into itself, and the summary sat over the search
+field. Anything that takes vertical room now comes out of the same budget: the
+list yields to it rather than adding to it, and never shrinks below a couple of
+rows, because a summary must not squeeze out the thing it summarises. The budget
+itself is the smaller of 640 and the screen the panel hangs from.
+
+A summary is a paragraph — the prompt asks for eight lines — but a backstop is
+not optional for text a model wrote: past 260pt it fades, the way a long answer
+does.

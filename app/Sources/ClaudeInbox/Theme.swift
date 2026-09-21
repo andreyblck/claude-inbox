@@ -55,7 +55,19 @@ enum Theme {
     static let leading: CGFloat = 4
 
     static let panelWidth: CGFloat = 440
-    static let panelMaxHeight: CGFloat = 640
+    /// The budget for everything the panel draws, not just its list — and never
+    /// more than the screen it hangs from. A digest above the list used to be
+    /// outside this sum, which is how the panel reached 1005pt and macOS clipped
+    /// it into itself, the summary sitting over the search field.
+    static var panelMaxHeight: CGFloat {
+        let screen = NSScreen.main?.visibleFrame.height ?? 900
+        return min(640, max(320, screen - 140))
+    }
+
+    /// A summary is a paragraph, and the prompt asks for eight lines. This is the
+    /// backstop for when it is not: past here it fades, so a talkative model
+    /// cannot push the list off the bottom of the screen.
+    static let digestMaxHeight: CGFloat = 260
 
     /// Someone has told the system that motion makes them unwell, and a panel
     /// that ignores that is not a Mac app. Everything below goes through here, so

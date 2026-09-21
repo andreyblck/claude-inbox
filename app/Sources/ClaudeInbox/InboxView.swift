@@ -5,6 +5,7 @@ import SwiftUI
 struct InboxView: View {
     @Bindable var store: InboxStore
     @State private var contentHeight: CGFloat = 0
+    @State private var digestHeight: CGFloat = 0
     @State private var composing = false
     @State private var query = ""
     @State private var cursor = 0
@@ -86,7 +87,7 @@ struct InboxView: View {
                 Divider()
             }
             if store.digest != nil || store.problem != nil {
-                DigestBanner(store: store)
+                DigestBanner(store: store, height: $digestHeight)
                 Divider()
             }
 
@@ -251,7 +252,10 @@ struct InboxView: View {
         }
         .scrollIndicators(.never)
         // As short as one row, never taller than the panel is allowed to be.
-        .frame(height: min(max(contentHeight, 1), Theme.panelMaxHeight))
+        // The list yields to whatever else is on screen rather than adding to it.
+        // Never below a couple of rows, though: a digest must not squeeze the
+        // thing it is a summary of out of view.
+        .frame(height: min(max(contentHeight, 1), max(200, Theme.panelMaxHeight - digestHeight)))
         // A row opened from elsewhere — a tapped banner — takes the keyboard with
         // it, so the scroller below carries it into view.
         .onChange(of: store.openRowID) { _, id in
@@ -583,6 +587,8 @@ private struct NewTask: View {
 /// The digest, or why there isn't one.
 private struct DigestBanner: View {
     @Bindable var store: InboxStore
+    @Binding var height: CGFloat
+    @State private var textHeight: CGFloat = 0
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Space.step) {
@@ -595,7 +601,17 @@ private struct DigestBanner: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if let digest = store.digest {
+                let capped = textHeight > Theme.digestMaxHeight
                 MarkdownView(text: digest)
+                    .measureHeight(into: $textHeight)
+                    .frame(height: capped ? Theme.digestMaxHeight : nil, alignment: .top)
+                    .clipped()
+                    .mask(
+                        LinearGradient(
+                            stops: [.init(color: .black, location: 0),
+                                    .init(color: .black, location: capped ? 0.88 : 1),
+                                    .init(color: capped ? .clear : .black, location: 1)],
+                            startPoint: .top, endPoint: .bottom))
             }
             Spacer(minLength: Theme.Space.step)
             Button { store.clearDigest() } label: {
@@ -606,6 +622,10 @@ private struct DigestBanner: View {
         }
         .padding(.horizontal, Theme.Space.wide)
         .padding(.vertical, Theme.Space.gap)
+        // A surface of its own, so it reads as something laid over the list
+        // rather than as text that lost its way into the header.
+        .background(.primary.opacity(0.04))
+        .measureHeight(into: $height)
     }
 }
 
