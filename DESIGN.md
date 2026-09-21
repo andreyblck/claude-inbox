@@ -318,3 +318,24 @@ panel could not be scrolled at all, and an open row became a dead end you had to
 collapse to get out of. A long answer is capped, faded at the cut and opened in
 place with **Show more**; it is never given a scroller of its own. A horizontal
 one, like the row of replies, is fine: it competes with nothing.
+
+## Motion
+
+Enough that the panel is followable, and no more. Rows arrive with a fade and a
+little travel and leave by shrinking out of the way — asymmetric, because what
+goes should clear faster than what comes settles. A row that moves between
+groups is seen to move. Ages and counts roll rather than swap. A state that
+changes replaces its symbol rather than cutting to it. A line that changes as a
+session talks crossfades.
+
+Two rules hold it down. Nothing moves while the panel is closed — anything
+animated is a `TimelineView` gated on that, never a repeating `symbolEffect`,
+which redraws for as long as the view exists and once cost a third of a core at
+rest. And every duration goes through `Theme`, which returns nothing at all when
+the system asks for reduced motion: someone has said that motion makes them
+unwell, and a panel that ignores it is not a Mac app.
+
+A control answers the press. A plain button gives no sign it was touched, which
+on an option that commits an answer is the one place silence is unaffordable —
+so an option row fills under the pointer, fills harder while held, and settles
+rather than snapping back.

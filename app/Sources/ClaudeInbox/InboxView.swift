@@ -246,7 +246,7 @@ struct InboxView: View {
             // should be seen to move, or the list just reshuffles under the eye.
             // Not while filtering: there the list has to keep up with the keys, and
             // an animation per keystroke is a list that is always catching up.
-            .animation(query.isEmpty ? Theme.expand : nil, value: visible.map { $0.id + $0.state.rawValue })
+            .animation(query.isEmpty ? Theme.shuffle : nil, value: visible.map { $0.id + $0.state.rawValue })
             .measureHeight(into: $contentHeight)
         }
         .scrollIndicators(.never)
@@ -322,8 +322,11 @@ struct InboxView: View {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                         RowCard(row: row, store: store, focused: focusedID == row.id)
                             .id(row.id)
+                            .transition(Theme.rowTransition)
                         if index < rows.count - 1 {
-                            Divider().padding(.leading, RowCard.textInset)
+                            Divider()
+                                .padding(.leading, RowCard.textInset)
+                                .transition(.opacity)
                         }
                     }
                 }
@@ -753,11 +756,15 @@ private struct RowCard: View {
                         .font(overdue ? Theme.Font.caption.weight(.semibold) : Theme.Font.caption)
                         .foregroundStyle(overdue ? AnyShapeStyle(Color.orange) : AnyShapeStyle(HierarchicalShapeStyle.secondary))
                         .monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(Theme.shuffle, value: Format.age(row.ts))
                 }
                 // What it says. A row that wants something, or has an answer to
                 // read, is set in the primary colour; one that is only running is
                 // weather, and recedes.
                 Text(subject)
+                    .contentTransition(.opacity)
+                    .animation(Theme.shuffle, value: subject)
                     .font(unread ? Theme.Font.subject.weight(.medium) : Theme.Font.subject)
                     .foregroundStyle(row.state.group == .running || (row.state.group == .answered && !unread)
                                      ? .secondary : .primary)
@@ -796,6 +803,9 @@ private struct RowCard: View {
             }
         }
         .frame(width: 20, alignment: .center)
+        .contentTransition(.symbolEffect(.replace))
+        .animation(Theme.expand, value: row.state)
+        .animation(Theme.expand, value: unread)
         .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
     }
 
@@ -1272,22 +1282,21 @@ private struct QuestionForm: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     ForEach(q.options, id: \.self) { option in
-                        Button {
-                            pick(q, option)
-                        } label: {
+                        Button { pick(q, option) } label: {
                             HStack(spacing: Theme.Space.snug) {
                                 Image(systemName: mark(q, option))
                                     .foregroundStyle(picked(q, option) ? AnyShapeStyle(Color.accentColor)
                                                                        : AnyShapeStyle(HierarchicalShapeStyle.tertiary))
+                                    .contentTransition(.symbolEffect(.replace))
                                 Text(option)
                                     .font(Theme.Font.reading)
                                     .multilineTextAlignment(.leading)
                                     .fixedSize(horizontal: false, vertical: true)
                                 Spacer(minLength: 0)
                             }
-                            .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(OptionButton())
+                        .animation(Theme.hover, value: picked(q, option))
                     }
                     TextField("Something else…", text: binding(for: q), axis: .vertical)
                         .textFieldStyle(.plain)

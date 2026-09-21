@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// One place for every number a view is allowed to use.
@@ -56,10 +57,30 @@ enum Theme {
     static let panelWidth: CGFloat = 440
     static let panelMaxHeight: CGFloat = 640
 
+    /// Someone has told the system that motion makes them unwell, and a panel
+    /// that ignores that is not a Mac app. Everything below goes through here, so
+    /// there is one switch rather than a dozen places that forgot.
+    static var reduceMotion: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
     /// Expanding a card moves everything below it. Without motion that reads as
     /// the list jumping; with too much it reads as a toy.
-    static let expand = Animation.snappy(duration: 0.22, extraBounce: 0)
-    static let hover = Animation.easeOut(duration: 0.12)
+    static var expand: Animation? { reduceMotion ? nil : .snappy(duration: 0.22, extraBounce: 0) }
+    static var hover: Animation? { reduceMotion ? nil : .easeOut(duration: 0.12) }
+    /// A row arriving or leaving. Slower than a hover and gentler than an expand:
+    /// it is the list changing under you, and it should be followable.
+    static var shuffle: Animation? { reduceMotion ? nil : .smooth(duration: 0.3) }
+
+    /// Arriving and leaving the way a Mac list does it — a fade with a little
+    /// travel, never a pop. Asymmetric on purpose: what leaves gets out of the
+    /// way faster than what arrives settles in.
+    static var rowTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: -6)),
+            removal: .opacity.combined(with: .scale(scale: 0.97, anchor: .top)))
+    }
 
     /// One scale for every usage number in the product.
     static func usageTint(_ percentage: Double) -> Color {
@@ -157,5 +178,30 @@ struct UsageRing: View {
         .help(help)
         .onHover { value in withAnimation(Theme.hover) { hovering = value } }
         .animation(Theme.expand, value: fraction)
+    }
+}
+
+/// A row you can choose.
+///
+/// A plain button gives no sign it was pressed, which on a control that commits
+/// an answer is the one place silence is unaffordable — the person is left
+/// wondering whether the tap landed. This is what a Mac list row does: a quiet
+/// fill under the pointer, a firmer one while held, and it settles rather than
+/// snapping back.
+struct OptionButton: ButtonStyle {
+    @State private var hovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, Theme.Space.snug)
+            .padding(.vertical, Theme.Space.tight + 1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous)
+                    .fill(.primary.opacity(configuration.isPressed ? 0.12 : hovering ? 0.06 : 0)))
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed && !Theme.reduceMotion ? 0.985 : 1, anchor: .leading)
+            .animation(Theme.hover, value: configuration.isPressed)
+            .onHover { value in withAnimation(Theme.hover) { hovering = value } }
     }
 }
