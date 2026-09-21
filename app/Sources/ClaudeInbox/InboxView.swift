@@ -248,6 +248,12 @@ struct InboxView: View {
         .scrollIndicators(.never)
         // As short as one row, never taller than the panel is allowed to be.
         .frame(height: min(max(contentHeight, 1), Theme.panelMaxHeight))
+        // A row opened from elsewhere — a tapped banner — takes the keyboard with
+        // it, so the scroller below carries it into view.
+        .onChange(of: store.openRowID) { _, id in
+            guard let id, let index = visible.firstIndex(where: { $0.id == id }) else { return }
+            cursor = index
+        }
         .onChange(of: cursor) { _, index in
             guard visible.indices.contains(index) else { return }
             withAnimation(Theme.hover) { scroller.scrollTo(visible[index].id, anchor: .center) }

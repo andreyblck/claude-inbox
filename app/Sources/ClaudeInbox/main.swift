@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         Notifier.shared.onDecision = { [weak self] req, allow in
             self?.store.decide(req: req, allow: allow)
         }
+        Notifier.shared.onOpen = { [weak self] id in self?.reveal(id) }
         store.start()
         render()
 
@@ -146,7 +147,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             popover.performClose(nil)
             return
         }
+        showPanel()
+    }
+
+    /// Open the panel, and the row a banner was about. A banner that says a
+    /// session needs you and then goes nowhere is worse than no banner.
+    private func reveal(_ id: String) {
+        showPanel()
+        store.open(id: id)
+    }
+
+    private func showPanel() {
+        guard !popover.isShown else { return }
         guard let button = statusItem.button else { return }
+        // The popover is transient: without coming forward first it is dismissed
+        // the moment it appears, because the browser the banner was tapped over
+        // is still the active app.
+        NSApplication.shared.activate()
         store.reload()
         store.panelVisible = true
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)

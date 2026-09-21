@@ -63,6 +63,9 @@ in `decision.updatedInput`; see `PLAN.md` and the spike.
 
 ## Context
 
+- **A `Row.id` is composed** (`session:<id>`, `pending:<req>`) while a notification carries the
+  bare id. Match with `Row.answers(to:)`, never `== row.id` — that mismatch is why a tapped
+  banner did nothing for two releases.
 - **The output shape is the whole ballgame.** A `PermissionRequest` decision is an object.
   A string there fails validation *quietly* and looks exactly like a timeout. Check
   `spikes/README.md` before touching hook output, and run `e2e.sh` after.

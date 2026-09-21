@@ -107,6 +107,10 @@ final class InboxStore {
                 self.usage = usage
                 self.bridgeInstalled = installed
                 self.loadedOnce = true
+                if let wanted = self.wanted, let row = rows.first(where: { $0.answers(to: wanted) }) {
+                    self.wanted = nil
+                    self.open(row)
+                }
                 // Announcing is a side effect of knowing, so it belongs with the
                 // read rather than on a schedule of its own.
                 Notifier.shared.sync(
@@ -145,6 +149,21 @@ final class InboxStore {
                 self.narration = narration
                 self.activity = activity
             }
+        }
+    }
+
+    /// A row the panel has been asked to open but has not read yet.
+    private var wanted: String?
+
+    /// Open by id — what a tapped banner has to work with. The row may not be in
+    /// hand yet, so the wish is remembered and granted by the next read.
+    func open(id: String) {
+        if let row = rows.first(where: { $0.answers(to: id) }) {
+            wanted = nil
+            open(row)
+        } else {
+            wanted = id
+            reload()
         }
     }
 

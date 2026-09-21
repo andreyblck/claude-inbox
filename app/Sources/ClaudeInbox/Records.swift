@@ -190,6 +190,17 @@ enum Row: Identifiable, Sendable {
         }
     }
 
+    /// Does this row answer to that name? A banner carries the bare request id or
+    /// session id, not the composed row id — matching only on `id` meant a tapped
+    /// banner never found its row.
+    func answers(to name: String) -> Bool {
+        if id == name { return true }
+        switch self {
+        case .pending(let p): return p.req == name || p.sessionId == name
+        case .session(let s): return s.sessionId == name
+        }
+    }
+
     var state: InboxState {
         switch self {
         case .pending(let p): p.state

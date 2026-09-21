@@ -46,6 +46,7 @@ From source: `git clone https://github.com/andreyblck/claude-inbox.git && cd cla
 
 - Rows are named after the tracker issue the session works on (`ACME-231`, from a Linear link or a bare key in your prompt), else a short generated name ("Docs search"), else the session name.
 - Notes go back into a running session. They arrive as a message from a peer session, not as you — Claude Code frames them that way so nothing outside the terminal can impersonate you.
+- Tapping a banner opens the panel on that row, expanded. Approve and Deny are on the banner itself for a permission.
 - **✦** digests everything at once; **+** starts a session from the panel; right-click a row for Linear, terminal, copy, rename.
 - Native: light/dark, your accent colour, system fonts and symbols.
 

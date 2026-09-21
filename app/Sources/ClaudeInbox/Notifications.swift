@@ -25,6 +25,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Set by the app so an action can be answered without the panel being open.
     var onDecision: ((String, Bool) -> Void)?
+    /// Set by the app: the banner was tapped, show this one.
+    var onOpen: ((String) -> Void)?
 
     private var center: UNUserNotificationCenter? {
         // An app running outside a bundle has no notification centre, and asking
@@ -140,7 +142,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             switch action {
             case self.approve: self.onDecision?(req, true)
             case self.deny: self.onDecision?(req, false)
-            default: break  // tapping the banner opens the panel instead
+            // Tapping the banner itself. It used to do nothing at all, which is
+            // the worst thing a banner can do: it says a session needs you and
+            // then refuses to show you it.
+            case UNNotificationDefaultActionIdentifier: self.onOpen?(req)
+            default: break  // dismissed
             }
         }
     }
