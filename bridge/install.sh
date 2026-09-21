@@ -15,6 +15,7 @@ BRIDGE=$(pwd)
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 INBOX_DIR="${CLAUDE_INBOX_DIR:-$HOME/.claude/inbox}"
 WAIT=20
+ANSWER_WAIT=300
 MODE=install
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -32,7 +33,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-BRIDGE="$BRIDGE" CONFIG_DIR="$CONFIG_DIR" INBOX_DIR="$INBOX_DIR" WAIT="$WAIT" MODE="$MODE" \
+BRIDGE="$BRIDGE" CONFIG_DIR="$CONFIG_DIR" INBOX_DIR="$INBOX_DIR" WAIT="$WAIT" ANSWER_WAIT="$ANSWER_WAIT" MODE="$MODE" \
 /usr/bin/python3 - <<'PY'
 import json, os, pathlib, shutil, sys, time
 
@@ -40,6 +41,7 @@ bridge = pathlib.Path(os.environ["BRIDGE"])
 config = pathlib.Path(os.environ["CONFIG_DIR"])
 inbox = pathlib.Path(os.environ["INBOX_DIR"])
 wait = os.environ["WAIT"]
+answer_wait = os.environ["ANSWER_WAIT"]
 mode = os.environ["MODE"]
 
 # Recognise our own entries by script name, not by the path they were installed
@@ -92,8 +94,13 @@ if mode != "uninstall":
         "hooks": [{
             "type": "command",
             # env inline: hooks run in a shell and do not inherit ours
-            "command": f"CLAUDE_INBOX_PERMISSION_TIMEOUT={wait} {cmd('hook-permission.sh')}",
-            "timeout": int(wait) + 40,
+            "command": (f"CLAUDE_INBOX_PERMISSION_TIMEOUT={wait} "
+                        f"CLAUDE_INBOX_ANSWER_TIMEOUT={answer_wait} {cmd('hook-permission.sh')}"),
+            # The cap Claude Code kills the hook at, not how long it waits: a
+            # permission still gives the terminal back after `wait`. It has to
+            # cover the longest thing the hook may legitimately sit through,
+            # which is a person reading a question.
+            "timeout": max(int(wait), int(answer_wait)) + 40,
         }]
     })
     # UserPromptSubmit is what puts a session back to "working" after a Stop.

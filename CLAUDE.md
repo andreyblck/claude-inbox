@@ -66,6 +66,11 @@ in `decision.updatedInput`; see `PLAN.md` and the spike.
 - **A `Row.id` is composed** (`session:<id>`, `pending:<req>`) while a notification carries the
   bare id. Match with `Row.answers(to:)`, never `== row.id` — that mismatch is why a tapped
   banner did nothing for two releases.
+- **A question is not a permission.** 20s is a liveness budget for "may I run this"; a question
+  is read and thought about. `CLAUDE_INBOX_ANSWER_TIMEOUT` (300s) covers question/plan, and the
+  hook entry's `timeout` in settings.json has to cover the longer of the two or Claude Code kills
+  the hook first. Changing either means re-running `install.sh` — an installed settings.json
+  keeps the numbers it was written with.
 - **The output shape is the whole ballgame.** A `PermissionRequest` decision is an object.
   A string there fails validation *quietly* and looks exactly like a timeout. Check
   `spikes/README.md` before touching hook output, and run `e2e.sh` after.

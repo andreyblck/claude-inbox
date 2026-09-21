@@ -10,6 +10,13 @@ cd "$(dirname "$0")" 2>/dev/null || exit 0
 . ./lib.sh 2>/dev/null || exit 0
 
 TIMEOUT="${CLAUDE_INBOX_PERMISSION_TIMEOUT:-300}"
+# A question is not a permission. 20s is a liveness budget for "may I run this":
+# if the app is broken the terminal prompts a moment later and nothing is lost.
+# A question is read, thought about and answered — minutes, not seconds — and
+# waiting costs nothing, because Claude Code shows its own dialog at the same
+# time and whoever answers first wins. Giving up after 20s is why a question sat
+# in the panel as "Claude needs your permission" with nothing under it.
+ANSWER_TIMEOUT="${CLAUDE_INBOX_ANSWER_TIMEOUT:-300}"
 
 payload=$(cat) || exit 0
 inbox_ready || exit 0
@@ -61,7 +68,11 @@ printf '%s' "$payload" | "$JQ" --arg req "$req" --arg kind "$kind" --arg state "
 # every prompt, in exchange for an answer that was never coming.
 inbox_listening || exit 0
 
-verdict=$(inbox_wait "$req" "$TIMEOUT") || exit 0
+case "$kind" in
+  question|plan) wait_for="$ANSWER_TIMEOUT" ;;
+  *)             wait_for="$TIMEOUT" ;;
+esac
+verdict=$(inbox_wait "$req" "$wait_for") || exit 0
 
 decision=$(printf '%s' "$verdict" | "$JQ" -r '.decision // empty' 2>/dev/null)
 case "$decision" in

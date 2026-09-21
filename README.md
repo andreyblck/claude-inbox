@@ -108,6 +108,7 @@ spec/     The rules the app is ported from, in TypeScript with tests. Rules chan
 ```
 
 - **Permissions:** the `PermissionRequest` hook holds the request open and polls for a verdict file; the app writes one; the hook prints the decision. No verdict in 20 s → the hook goes silent and the terminal prompts as usual. App not running → no wait at all.
+- **Questions and plans wait longer** — 300 s, because they are read and thought about, not glanced at. Nothing is lost by waiting: Claude Code shows its own dialog at the same time and whoever answers first wins. Answer it in the terminal and the row disappears from the panel on the session's next event.
 - **Rule for every hook:** never break a session. Any error → exit 0, print nothing. The bridge can only add a faster path, never remove the normal one.
 - **Two sources merged by freshest observation:** Claude Code's own session registry (who is alive) and the hooks (what they want). Neither alone is right.
 - **A row's line**, in order: the model's sentence before its last action → what you asked → Claude Code's title → the tool in use. Blocked rows lead with the tool call they are stopped on.

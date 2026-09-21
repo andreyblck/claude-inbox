@@ -89,6 +89,20 @@ check "answer arrives"   "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOu
 check "input echoed"     "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision.updatedInput.questions[0].header')" "Pick"
 check "still an allow"   "$(printf '%s' "$out" | /usr/bin/jq -r '.hookSpecificOutput.decision.behavior')" "allow"
 
+echo "1e. a request answered in the terminal stops being a row"
+# The hook is still waiting — a question waits minutes — so its pending file is
+# still a row. The session's own record moving on is the tell that the turn went
+# on without us.
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s-20","cwd":"/x","prompt":"go"}' | ./hook-session.sh
+/usr/bin/jq -n --argjson ts "$(( $(date +%s) - 60 ))" '{req:"stale", kind:"question", state:"blocked.question", ts:$ts, session_id:"s-20", pid:$pid}' --argjson pid "$$" \
+  > "$CLAUDE_INBOX_DIR/pending/stale.json"
+/usr/bin/jq -n --argjson ts "$(( $(date +%s) + 60 ))" '{req:"fresh", kind:"question", state:"blocked.question", ts:$ts, session_id:"s-20", pid:$pid}' --argjson pid "$$" \
+  > "$CLAUDE_INBOX_DIR/pending/fresh.json"
+printf '%s' '{"hook_event_name":"Stop","session_id":"s-20","cwd":"/x","last_assistant_message":"answered it myself"}' | ./hook-session.sh
+check "settled row swept"   "$([ -f "$CLAUDE_INBOX_DIR/pending/stale.json" ] && echo kept || echo gone)" "gone"
+check "open row kept"       "$([ -f "$CLAUDE_INBOX_DIR/pending/fresh.json" ] && echo kept || echo gone)" "kept"
+rm -f "$CLAUDE_INBOX_DIR"/pending/fresh.json
+
 echo "1b. deny carries the message the model is told"
 ( for _ in $(seq 1 100); do
     f=$(ls "$CLAUDE_INBOX_DIR/pending"/*.json 2>/dev/null | head -1) || true

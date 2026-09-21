@@ -87,6 +87,19 @@ inbox_reap() {
     [ -n "$pid" ] || continue                       # demo rows and old formats stay
     kill -0 "$pid" 2>/dev/null || rm -f "$f" 2>/dev/null
   done
+  # Answered in the terminal instead. The hook is still waiting and its pending
+  # file is still a row, so the panel would show a question that is already
+  # settled — for as long as the wait lasts. The session's own record moving on
+  # is the tell: it only advances when the turn does.
+  for f in "$INBOX_DIR"/pending/*.json; do
+    [ -f "$f" ] || continue
+    sid=$("$JQ" -r '.session_id // empty' "$f" 2>/dev/null) || continue
+    [ -n "$sid" ] || continue
+    pts=$("$JQ" -r '.ts // 0' "$f" 2>/dev/null)
+    sts=$("$JQ" -r '.ts // 0' "$INBOX_DIR/sessions/$sid.json" 2>/dev/null) || continue
+    case "$pts$sts" in *[!0-9]*) continue ;; esac
+    [ "$sts" -gt "$pts" ] && rm -f "$f" 2>/dev/null
+  done
   # A verdict written after its hook gave up has nobody to consume it.
   for f in "$INBOX_DIR"/verdicts/*.json; do
     [ -f "$f" ] || continue
